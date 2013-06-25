@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -XGADTs -XRankNTypes #-}
+
 module HIR(M, termToHIR, HNode(..), HFunction(..),
            VarId, InpId, ResId) where
 
