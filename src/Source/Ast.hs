@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wall -Werror -i..  #-}
+
 module Source.Ast(BinOp(..), Term(..), Id) where
 
 data BinOp = PlusOp | MinusOp | MultOp | DivOp | LtOp | EqOp deriving(Ord, Eq)
@@ -14,6 +16,7 @@ data Term = SymT Id | IntT Int | BoolT Bool | AbsT [Id] Term
           | AppT Term Term | IfT Term Term Term | BinT BinOp Term Term
           deriving(Ord, Eq)
 
+maybeAddParens :: Bool -> String -> String
 maybeAddParens False string = string
 maybeAddParens True string = "(" ++ string ++ ")"
 
