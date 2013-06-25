@@ -1,4 +1,5 @@
-module HIR where
+module HIR(M, termToHIR, HNode(..), HFunction(..),
+           VarId, InpId, ResId) where
 
 import qualified Data.List as L
 import qualified Data.Map as M
@@ -62,8 +63,8 @@ data LoweringState = LoweringState {
   }
 type LiftM = St.State LoweringState
 
-lift :: Term -> LiftM LiftedTerm
-lift = liftWithEnv M.empty
+liftTerm :: Term -> LiftM LiftedTerm
+liftTerm = liftWithEnv M.empty
   where
     liftWithEnv :: M.Map Id Int -> Term -> LiftM LiftedTerm
     liftWithEnv env (SymT var) =
@@ -94,12 +95,6 @@ lift = liftWithEnv M.empty
       (LoweringState fnList (newName:names)) <- St.get
       St.put $ LoweringState (LiftedFunction newName argC body:fnList) names
       return newName
-
-runLifting :: Term -> [LiftedFunction]
-runLifting term =
-  let (mainTerm, LoweringState fns _) = St.runState (lift term) freshLoweringState
-  in LiftedFunction 0 0 mainTerm:fns
-  where freshLoweringState = LoweringState [] [1..]
 
 {-  HNode defines an SSA IR to which we transform each function for
  -  mization.It uses the Hoopl library.  The 'H' stands for 'high-level' -}
@@ -133,6 +128,17 @@ data HFunction = HFunction { name :: FunctionId, argCount :: Int,
                              entry :: Label, body :: Graph HNode C C }
 
 type M = CheckingFuelMonad SimpleUniqueMonad
+
+termToHIR :: Term -> Maybe (M [HFunction])
+termToHIR term = if isClosed term then Just (compile term) else Nothing
+  where compile term = let openedTerm = openLambdas term
+                           liftedTerm = runLifting openedTerm
+                       in mapM liftedFunctionToHIR liftedTerm
+
+        runLifting term =
+          let (mainTerm, LoweringState fns _) =
+                St.runState (liftTerm term) (LoweringState [] [1..])
+          in LiftedFunction 0 0 mainTerm:fns
 
 liftedFunctionToHIR :: LiftedFunction -> M HFunction
 liftedFunctionToHIR (LiftedFunction fnId argC fullTerm) = do
