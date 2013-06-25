@@ -1,11 +1,11 @@
-module Parse(parseString) where
+module Source.Parse(parseString) where
 
 import Control.Monad
 
 import Text.Parsec.Char
 import Text.ParserCombinators.Parsec
 
-import Ast
+import Source.Ast
 
 parseString :: String -> String -> Either String Term
 parseString fileName text = case parse pTerm fileName text of

@@ -1,7 +1,7 @@
-{-# OPTIONS_GHC -XGADTs -XRankNTypes #-}
+{-# OPTIONS_GHC -i.. -XGADTs -XRankNTypes #-}
 
-module HIR(M, termToHIR, HNode(..), HFunction(..),
-           VarId, InpId, ResId) where
+module HIR.HIR(M, termToHIR, HNode(..), HFunction(..),
+               VarId, InpId, ResId) where
 
 import qualified Data.List as L
 import qualified Data.Map as M
@@ -10,8 +10,8 @@ import qualified Data.Set as S
 import qualified Control.Monad.State as St
 import Compiler.Hoopl
 
-import Ast
-import Parse
+import Source.Ast
+import Source.Parse
 
 getOpenVariables :: S.Set Id -> Term -> S.Set Id
 getOpenVariables env (SymT var) =

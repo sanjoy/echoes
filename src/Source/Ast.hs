@@ -1,4 +1,4 @@
-module Ast(BinOp(..), Term(..), Id) where
+module Source.Ast(BinOp(..), Term(..), Id) where
 
 data BinOp = PlusOp | MinusOp | MultOp | DivOp | LtOp | EqOp deriving(Ord, Eq)
 instance Show BinOp where
