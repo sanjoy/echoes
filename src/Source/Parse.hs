@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wall -Werror -i..  #-}
+
 module Source.Parse(parseString) where
 
 import Control.Monad
@@ -20,7 +22,7 @@ pTerm = try pSym <|> try pIntLit <|> try pBoolLit <|> try pAbs <|>
         pBoolLit = liftM BoolT $ choice [try (string "true") >> return True,
                                          try (string "false") >> return False]
         pAbs = between open close $ do
-          string "lam"
+          _ <- string "lam"
           spaces
           args <- between open close $ sepBy1 variable spaces
           spaces
@@ -30,7 +32,7 @@ pTerm = try pSym <|> try pIntLit <|> try pBoolLit <|> try pAbs <|>
           (left, right) <- parseDouble
           return $ AppT left right
         pIfThenElse = between open close $ do
-          string "if"
+          _ <- string "if"
           spaces
           condition <- pTerm
           spaces
