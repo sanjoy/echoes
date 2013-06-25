@@ -1,4 +1,5 @@
-{-# OPTIONS_GHC -i.. -XGADTs -XRankNTypes #-}
+{-# OPTIONS_GHC -i..  #-}
+{-# LANGUAGE GADTs, RankNTypes #-}
 
 module HIR.HIR(M, termToHIR, HNode(..), HFunction(..),
                VarId, InpId, ResId) where
