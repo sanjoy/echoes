@@ -1,8 +1,10 @@
-{-# OPTIONS_GHC -Wall -Werror -fno-warn-unused-binds -fno-warn-orphans -i..  #-}
+{-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans -i..  #-}
 {-# LANGUAGE GADTs, RankNTypes #-}
 
 module HIR.HIR(M, termToHIR, HNode(..), HFunction(..),
-               VarId, InpId, ResId) where
+               VarId, InpId, ResId,
+               hirDebugShowNode, hirDebugShowGraph)
+       where
 
 import qualified Data.List as L
 import qualified Data.Map as M
@@ -217,43 +219,38 @@ instance UniqueMonad m => UniqueMonad (St.StateT s m) where
 
 {-  Debugging tools.  -}
 
-showV :: Show a => a -> String
-showV x = "[" ++ show x ++ "]"
+hirDebugShowNode :: forall e x . HNode e x -> String
+hirDebugShowNode = showNode
+  where
+    showV x = "[" ++ show x ++ "]"
+    showP (x, y) = "(" ++ showV x ++ ", " ++ show y ++ ")"
 
-showL :: Show a => a -> String
-showL x = show x
+    showNode (LabelHN lbl) = show lbl ++ ":\n"
+    showNode (LoadArgHN argId resId) = showV resId ++ " <- A(" ++ show argId ++ ")"
+    showNode (LoadIntLitHN lit resId) = showV resId ++ " <- $" ++ show lit
+    showNode (LoadBoolLitHN lit resId) = showV resId ++ " <- $" ++ show lit
+    showNode (LoadClosureHN lit resId) = showV resId ++ " <- C(" ++ show lit ++ ")"
+    showNode (BinOpHN op left right resId) = show resId ++ " <- " ++ showV left ++
+                                             " " ++ show op ++ " " ++ showV right
+    showNode (PushHN fn arg resId) = showV resId ++ " <- P(" ++ showV fn ++ ", " ++
+                                     showV arg ++ ")"
+    showNode (ForceHN arg resId) = showV resId ++ " <- F(" ++ showV arg ++ ")"
+    showNode (IfThenElseHN condV leftL rightL) =
+      "If " ++ showV condV ++ " then goto " ++ show leftL ++ " else goto " ++
+      show rightL
+    showNode (JumpHN label) = "Jump " ++ show label
+    showNode (Phi2HN (iA, lA) (iB, lB) resId) =
+      show resId ++ " <- Phi(" ++ showP (iA, lA) ++ ", " ++ showP (iB, lB) ++ ")"
+    showNode (ReturnHN result) = "Return " ++ showV result
 
-showP :: (Show a, Show b) => (a, b) -> String
-showP (x, y) = "(" ++ showV x ++ ", " ++ showL y ++ ")"
-
-showNode :: forall e x . HNode e x -> String
-showNode (LabelHN lbl) = showL lbl ++ ":\n"
-showNode (LoadArgHN argId resId) = showV resId ++ " <- A(" ++ show argId ++ ")"
-showNode (LoadIntLitHN lit resId) = showV resId ++ " <- $" ++ show lit
-showNode (LoadBoolLitHN lit resId) = showV resId ++ " <- $" ++ show lit
-showNode (LoadClosureHN lit resId) = showV resId ++ " <- C(" ++ show lit ++ ")"
-showNode (BinOpHN op left right resId) = show resId ++ " <- " ++ showV left ++
-                                         " " ++ show op ++ " " ++ showV right
-showNode (PushHN fn arg resId) = showV resId ++ " <- P(" ++ showV fn ++ ", " ++
-                                 showV arg ++ ")"
-showNode (ForceHN arg resId) = showV resId ++ " <- F(" ++ showV arg ++ ")"
-showNode (IfThenElseHN condV leftL rightL) =
-  "If " ++ showV condV ++ " then goto " ++ showL leftL ++ " else goto " ++
-  showL rightL
-showNode (JumpHN label) = "Jump " ++ showL label
-showNode (Phi2HN (iA, lA) (iB, lB) resId) =
-  show resId ++ " <- Phi(" ++ showP (iA, lA) ++ ", " ++ showP (iB, lB) ++ ")"
-showNode (ReturnHN result) = "Return " ++ showV result
-
-showHIRGraph :: M HFunction -> String
-showHIRGraph fn =
-  let (HFunction name argC entry body) =
-        runSimpleUniqueMonad $ runWithFuel fuel fn
-  in "FunctionId = " ++ show name ++ "\n" ++
-     "ArgCount  = " ++ show argC ++ "\n" ++
-     "EntryLabel = " ++ show entry ++ "\n" ++
-     "Body {\n" ++ showGraph showNode body ++  "}\n"
-  where fuel = 999999
-
-printHIRGraph :: M HFunction -> IO ()
-printHIRGraph = putStrLn . showHIRGraph
+hirDebugShowGraph :: M [HFunction] -> String
+hirDebugShowGraph fn =
+  let functionList = runSimpleUniqueMonad $ runWithFuel fuel fn
+  in L.intercalate "\n\n" $ map showHFunction functionList
+  where
+    showHFunction (HFunction name argC entry body) =
+      "FunctionId = " ++ show name ++ "\n" ++
+      "ArgCount  = " ++ show argC ++ "\n" ++
+      "EntryLabel = " ++ show entry ++ "\n" ++
+      "Body {\n" ++ showGraph hirDebugShowNode body ++  "}\n"
+    fuel = 999999
