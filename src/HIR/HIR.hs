@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -i..  #-}
+{-# OPTIONS_GHC -Wall -Werror -fno-warn-unused-binds -fno-warn-orphans -i..  #-}
 {-# LANGUAGE GADTs, RankNTypes #-}
 
 module HIR.HIR(M, termToHIR, HNode(..), HFunction(..),
@@ -12,7 +12,6 @@ import qualified Control.Monad.State as St
 import Compiler.Hoopl
 
 import Source.Ast
-import Source.Parse
 
 getOpenVariables :: S.Set Id -> Term -> S.Set Id
 getOpenVariables env (SymT var) =
@@ -28,6 +27,7 @@ getOpenVariables env (IfT c t f) =
 getOpenVariables env (BinT _ l r) =
   S.unions $ map (getOpenVariables env) [l, r]
 
+isClosed :: Term -> Bool
 isClosed = S.null . getOpenVariables S.empty
 
 {- Make closures explicit -- symbols that would normally capture
@@ -60,10 +60,7 @@ data LiftedTerm = ArgLT ArgId | IntLT Int | BoolLT Bool | FuncLT FunctionId
                 | AppLT LiftedTerm LiftedTerm | IfLT LiftedTerm LiftedTerm LiftedTerm
                 | BinLT BinOp LiftedTerm LiftedTerm deriving(Show, Ord, Eq)
 
-data LoweringState = LoweringState {
-  getGeneratedFnList :: [LiftedFunction],
-  getFnIdStream :: [FunctionId]
-  }
+data LoweringState = LoweringState [LiftedFunction] [FunctionId]
 type LiftM = St.State LoweringState
 
 liftTerm :: Term -> LiftM LiftedTerm
@@ -74,7 +71,7 @@ liftTerm = liftWithEnv M.empty
       return $ ArgLT $ Mby.fromJust $ M.lookup var env
     liftWithEnv _ (IntT lit) = return $ IntLT lit
     liftWithEnv _ (BoolT lit) = return $ BoolLT lit
-    liftWithEnv env (AbsT args body) = do
+    liftWithEnv _ (AbsT args body) = do
       let freshEnv = M.fromList $ zip args [0..]
       newLiftedFn <- liftWithEnv freshEnv body
       newFnName <- createFunction (length args) newLiftedFn
@@ -108,6 +105,7 @@ type ResId = VarId
 
 data HNode e x where
   LabelHN :: Label -> HNode C O
+
   LoadArgHN :: InpId -> ResId -> HNode O O
   LoadIntLitHN :: Int -> ResId -> HNode O O
   LoadBoolLitHN :: Bool -> ResId -> HNode O O
@@ -117,46 +115,48 @@ data HNode e x where
   -- Function -> Arg -> Result
   PushHN :: InpId -> InpId -> ResId -> HNode O O
   ForceHN :: InpId -> ResId -> HNode O O
+  Phi2HN :: (InpId, Label) -> (InpId, Label) -> ResId -> HNode O O
+
   IfThenElseHN :: InpId -> Label -> Label -> HNode O C
   JumpHN :: Label -> HNode O C
-  Phi2HN :: (InpId, Label) -> (InpId, Label) -> ResId -> HNode O O
   ReturnHN :: InpId -> HNode O C
 
 instance NonLocal HNode where
-  entryLabel (LabelHN l) = l
-  successors (IfThenElseHN _ t f) = [t, f]
+  entryLabel (LabelHN label) = label
+  successors (IfThenElseHN _ tLabel fLabel) = [tLabel, fLabel]
+  successors (JumpHN label) = [label]
   successors (ReturnHN _) = []
 
-data HFunction = HFunction { name :: FunctionId, argCount :: Int,
-                             entry :: Label, body :: Graph HNode C C }
+data HFunction = HFunction { hFnName :: FunctionId, hFnArgCount :: Int,
+                             hFnEntry :: Label, hFnBody :: Graph HNode C C }
 
 type M = CheckingFuelMonad SimpleUniqueMonad
 
 termToHIR :: Term -> Maybe (M [HFunction])
-termToHIR term = if isClosed term then Just (compile term) else Nothing
-  where compile term = let openedTerm = openLambdas term
+termToHIR term = if isClosed term then Just compiledTerm else Nothing
+  where compiledTerm = let openedTerm = openLambdas term
                            liftedTerm = runLifting openedTerm
                        in mapM liftedFunctionToHIR liftedTerm
 
-        runLifting term =
+        runLifting openedTerm =
           let (mainTerm, LoweringState fns _) =
-                St.runState (liftTerm term) (LoweringState [] [1..])
+                St.runState (liftTerm openedTerm) (LoweringState [] [1..])
           in LiftedFunction 0 0 mainTerm:fns
 
 liftedFunctionToHIR :: LiftedFunction -> M HFunction
 liftedFunctionToHIR (LiftedFunction fnId argC fullTerm) = do
-  ((fullTermTranslated, entryLabel), _) <-
+  ((fullTermTranslated, entry), _) <-
     St.runStateT (liftedTermToHIR fullTerm) [0..]
-  return HFunction{name = fnId, argCount = argC, entry = entryLabel,
-                   body = fullTermTranslated}
+  return HFunction{hFnName = fnId, hFnArgCount = argC, hFnEntry = entry,
+                   hFnBody = fullTermTranslated}
 
 liftedTermToHIR :: LiftedTerm -> HIRMonad (Graph HNode C C, Label)
 liftedTermToHIR fullTerm = do
-  entryLabel <- freshLabel
+  entry <- freshLabel
   (functionBody, resultVar) <- emit fullTerm
-  let fullGraph = mkFirst (LabelHN entryLabel) <*> functionBody <*>
+  let fullGraph = mkFirst (LabelHN entry) <*> functionBody <*>
                   mkLast (ReturnHN resultVar)
-  return (fullGraph, entryLabel)
+  return (fullGraph, entry)
   where emit :: LiftedTerm -> HIRMonad (Graph HNode O O, VarId)
         emit (ArgLT argId) = loadSimple (LoadArgHN argId)
         emit (IntLT intLit) = loadSimple (LoadIntLitHN intLit)
@@ -186,13 +186,13 @@ liftedTermToHIR fullTerm = do
                 mkMiddle (Phi2HN (tRes, tLabel) (fRes, fLabel) resultVar)
           return (ifThenElse, resultVar)
         emit (BinLT op left right) = do
-          (left, leftVar) <- emit left
-          (right, rightVar) <- emit right
+          (leftG, leftVar) <- emit left
+          (rightG, rightVar) <- emit right
           forcedLeftVar <- freshVarName
           forcedRightVar <- freshVarName
           resultVar <- freshVarName
           let computeBinOp =
-                left <*> right <*> mkMiddles [
+                leftG <*> rightG <*> mkMiddles [
                   ForceHN leftVar forcedLeftVar,
                   ForceHN rightVar forcedRightVar,
                   BinOpHN op forcedLeftVar forcedRightVar resultVar]
@@ -217,8 +217,13 @@ instance UniqueMonad m => UniqueMonad (St.StateT s m) where
 
 {-  Debugging tools.  -}
 
+showV :: Show a => a -> String
 showV x = "[" ++ show x ++ "]"
+
+showL :: Show a => a -> String
 showL x = show x
+
+showP :: (Show a, Show b) => (a, b) -> String
 showP (x, y) = "(" ++ showV x ++ ", " ++ showL y ++ ")"
 
 showNode :: forall e x . HNode e x -> String
@@ -250,4 +255,5 @@ showHIRGraph fn =
      "Body {\n" ++ showGraph showNode body ++  "}\n"
   where fuel = 999999
 
+printHIRGraph :: M HFunction -> IO ()
 printHIRGraph = putStrLn . showHIRGraph
