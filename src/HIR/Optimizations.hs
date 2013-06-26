@@ -3,8 +3,11 @@
 
 module HIR.Optimizations(optimizeHIR) where
 
+import Control.Monad
+
 import HIR.ConstantPropagation
+import HIR.DeadAssignmentElimination
 import HIR.HIR
 
 optimizeHIR :: [HFunction] -> M [HFunction]
-optimizeHIR = mapM runConstantPropagation
+optimizeHIR = mapM (runConstantPropagation >=> runDeadAssignmentElimination)

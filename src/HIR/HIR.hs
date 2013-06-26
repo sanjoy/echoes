@@ -2,7 +2,7 @@
 {-# LANGUAGE GADTs, RankNTypes #-}
 
 module HIR.HIR(M, termToHIR, HNode(..), HFunction(..),
-               VarId, InpId, ResId,
+               VarId, InpId, ResId, getVarsRead, getVarsWritten,
                hirDebugShowNode, hirDebugShowGraph)
        where
 
@@ -128,6 +128,26 @@ instance NonLocal HNode where
   successors (IfThenElseHN _ tLabel fLabel) = [tLabel, fLabel]
   successors (JumpHN label) = [label]
   successors (ReturnHN _) = []
+
+getVarsRead :: forall e x. HNode e x -> [VarId]
+getVarsRead = fst . getVRW
+
+getVarsWritten :: forall e x. HNode e x -> [VarId]
+getVarsWritten = snd . getVRW
+
+getVRW :: forall e x. HNode e x -> ([VarId], [VarId])
+getVRW LabelHN{} = ([], [])
+getVRW (LoadArgHN inp out) = ([inp], [out])
+getVRW (LoadBoolLitHN _ out) = ([], [out])
+getVRW (LoadIntLitHN _ out) = ([], [out])
+getVRW (LoadClosureHN _ out) = ([], [out])
+getVRW (BinOpHN _ inA inB out) = ([inA, inB], [out])
+getVRW (PushHN inA inB out) = ([inA, inB], [out])
+getVRW (ForceHN inp out) = ([inp], [out])
+getVRW (Phi2HN (inA, _) (inB, _) out) = ([inA, inB], [out])
+getVRW (IfThenElseHN inp _ _) = ([inp], [])
+getVRW JumpHN{} = ([], [])
+getVRW (ReturnHN inp) = ([inp], [])
 
 data HFunction = HFunction { hFnName :: FunctionId, hFnArgCount :: Int,
                              hFnEntry :: Label, hFnBody :: Graph HNode C C }
