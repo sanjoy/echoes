@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans -i..  #-}
-{-# LANGUAGE GADTs, RankNTypes, ScopedTypeVariables, ImpredicativeTypes, FunctionalDependencies #-}
+{-# LANGUAGE GADTs, RankNTypes, ScopedTypeVariables, ImpredicativeTypes #-}
 
 module Utils.Common(M, FunctionId, SSAVar, IRMonad) where
 
