@@ -1,7 +1,7 @@
 {-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans -i..  #-}
 {-# LANGUAGE GADTs, RankNTypes, ScopedTypeVariables, ImpredicativeTypes #-}
 
-module Utils.Common(M, FunctionId, SSAVar, IRMonad) where
+module Utils.Common(M, FunctionId, SSAVar, IRMonad, freshVarName) where
 
 import Compiler.Hoopl
 import Control.Monad.State
@@ -13,3 +13,6 @@ type SSAVar = Int
 type IRMonad a = StateT [SSAVar] M a
 instance UniqueMonad m => UniqueMonad (StateT s m) where
   freshUnique = StateT (\s -> liftM (\u -> (u, s)) freshUnique)
+
+freshVarName :: IRMonad SSAVar
+freshVarName = StateT (\(name:names) -> return (name, names))

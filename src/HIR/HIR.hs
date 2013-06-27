@@ -227,7 +227,6 @@ liftedTermToHIR fullTerm = do
           let termCode = mkFirst (LabelHN branchLabel) <*> termBody <*>
                          mkLast (JumpHN finalLabel)
           return (termCode, branchLabel, termResult)
-        freshVarName = St.StateT (\(name:names) -> return (name, names))
 
 
 
