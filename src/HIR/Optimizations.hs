@@ -7,8 +7,11 @@ import Control.Monad
 
 import HIR.ConstantPropagation
 import HIR.DeadAssignmentElimination
+import HIR.RemoveBadPhis
 import HIR.HIR
 import Utils.Common
 
 optimizeHIR :: [HFunction] -> M [HFunction]
-optimizeHIR = mapM (runConstantPropagation >=> runDeadAssignmentElimination)
+optimizeHIR = mapM (runConstantPropagation >=>
+                    runDeadAssignmentElimination >=>
+                    runRemoveBadPhis)

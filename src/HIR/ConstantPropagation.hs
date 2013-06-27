@@ -41,6 +41,7 @@ transferConstants = mkFTransfer3 closeOpen openOpen openClose
     openOpen (PushHN _ _ var) = hasTop var
     openOpen (ForceHN _ var) = hasTop var
     openOpen (Phi2HN _ _ var) = hasTop var
+    openOpen (CopyValueHN _ var) = hasTop var
 
     hasTop var = M.insert var Top
     hasConst var value = M.insert var $ PElem value
@@ -110,6 +111,11 @@ evaluateNode f (IfThenElseHN condition tLbl fLbl) = mwtToMby $ do
 evaluateNode f (ForceHN val result) = mwtToMby $ do
   constVal <- f val
   return $ loadConstant constVal result
+
+evaluateNode f (CopyValueHN val result) = mwtToMby $ do
+  constVal <- f val
+  return $ loadConstant constVal result
+
 evaluateNode _ _ = Nothing
 
 foldConstants :: forall m. FuelMonad m => FwdRewrite m HNode ConstantFact

@@ -117,6 +117,9 @@ data HNode e x where
   PushHN :: InpId -> InpId -> ResId -> HNode O O
   ForceHN :: InpId -> ResId -> HNode O O
   Phi2HN :: (InpId, Label) -> (InpId, Label) -> ResId -> HNode O O
+  -- In essence a no-op; RemoveBadPhis replaces illegal phi nodes with
+  -- this
+  CopyValueHN :: InpId -> ResId -> HNode O O
 
   IfThenElseHN :: InpId -> Label -> Label -> HNode O C
   JumpHN :: Label -> HNode O C
@@ -137,6 +140,7 @@ getVarsWritten = snd . getVRW
 
 getVRW :: forall e x. HNode e x -> ([SSAVar], [SSAVar])
 getVRW LabelHN{} = ([], [])
+getVRW (CopyValueHN inp out) = ([inp], [out])
 getVRW (LoadArgHN inp out) = ([inp], [out])
 getVRW (LoadBoolLitHN _ out) = ([], [out])
 getVRW (LoadIntLitHN _ out) = ([], [out])
