@@ -28,7 +28,7 @@ main = do
         Right term -> case termToHIR term of
           Nothing -> putStrLn "error: term not closed!"
           Just hir ->
-             putStrLn $ hirDebugShowGraph (hir >>= optimizeHIR)
+            putStrLn $ hirDebugShowGraph (hir >>= optimizeHIR)
   where getInputSource [] = Just (getContents, "(stdin)")
         getInputSource [fileN] = Just (readFile fileN, fileN)
         getInputSource _ = Nothing
