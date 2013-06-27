@@ -151,7 +151,8 @@ getVRW JumpHN{} = ([], [])
 getVRW (ReturnHN inp) = ([inp], [])
 
 data HFunction = HFunction { hFnName :: FunctionId, hFnArgCount :: Int,
-                             hFnEntry :: Label, hFnBody :: Graph HNode C C }
+                             hFnEntry :: Label, hFnBody :: Graph HNode C C,
+                             hFnLastSSAVar :: SSAVar }
 
 termToHIR :: Term -> Maybe (M [HFunction])
 termToHIR term = if isClosed term then Just compiledTerm else Nothing
@@ -166,19 +167,19 @@ termToHIR term = if isClosed term then Just compiledTerm else Nothing
 
 liftedFunctionToHIR :: LiftedFunction -> M HFunction
 liftedFunctionToHIR (LiftedFunction fnId argC fullTerm) = do
-  ((fullTermTranslated, entry), _) <-
-    St.runStateT (liftedTermToHIR fullTerm) [0..]
+  ((fullTermTranslated, entry), lastSSAVar, _) <-
+    runIRMonad (liftedTermToHIR fullTerm) 0 ()
   return HFunction{hFnName = fnId, hFnArgCount = argC, hFnEntry = entry,
-                   hFnBody = fullTermTranslated}
+                   hFnBody = fullTermTranslated, hFnLastSSAVar = lastSSAVar }
 
-liftedTermToHIR :: LiftedTerm -> IRMonad (Graph HNode C C, Label)
+liftedTermToHIR :: LiftedTerm -> IRMonad () (Graph HNode C C, Label)
 liftedTermToHIR fullTerm = do
   entry <- freshLabel
   (functionBody, resultVar) <- emit fullTerm
   let fullGraph = mkFirst (LabelHN entry) <*> functionBody <*>
                   mkLast (ReturnHN resultVar)
   return (fullGraph, entry)
-  where emit :: LiftedTerm -> IRMonad (Graph HNode O O, SSAVar)
+  where emit :: LiftedTerm -> IRMonad () (Graph HNode O O, SSAVar)
         emit (ArgLT argId) = loadSimple (LoadArgHN argId)
         emit (IntLT intLit) = loadSimple (LoadIntLitHN intLit)
         emit (BoolLT boolLit) = loadSimple (LoadBoolLitHN boolLit)
