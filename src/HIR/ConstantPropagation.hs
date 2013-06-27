@@ -12,9 +12,9 @@ import HIR.HIR
 import Source.Ast
 import Utils.Common
 
-data Constant = IntegerC Int | BooleanC Bool | ClosureC VarId
+data Constant = IntegerC Int | BooleanC Bool | ClosureC SSAVar
               deriving(Show, Eq, Ord)
-type ConstantFact = M.Map VarId (WithTop Constant)
+type ConstantFact = M.Map SSAVar (WithTop Constant)
 
 constantLattice :: DataflowLattice ConstantFact
 constantLattice = DataflowLattice {
@@ -53,7 +53,7 @@ transferConstants = mkFTransfer3 closeOpen openOpen openClose
     openClose (JumpHN lbl) f = mapSingleton lbl f
     openClose (ReturnHN _) _ = mapEmpty
 
-loadConstant :: Constant -> VarId -> HNode O O
+loadConstant :: Constant -> SSAVar -> HNode O O
 loadConstant (IntegerC intLit) resultVar = LoadIntLitHN intLit resultVar
 loadConstant (BooleanC boolLit) resultVar = LoadBoolLitHN boolLit resultVar
 loadConstant (ClosureC closureLit) resultVar =
@@ -73,7 +73,7 @@ mwtToMby :: MaybeWithTop a -> Maybe a
 mwtToMby (MWT (Just (PElem v))) = Just v
 mwtToMby _ = Nothing
 
-evaluateNode :: (VarId -> MaybeWithTop Constant) -> HNode e x -> Maybe (HNode e x)
+evaluateNode :: (SSAVar -> MaybeWithTop Constant) -> HNode e x -> Maybe (HNode e x)
 evaluateNode f (BinOpHN op left right result) = mwtToMby $ do
   leftLit <- f left
   rightLit <- f right

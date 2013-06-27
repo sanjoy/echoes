@@ -11,7 +11,7 @@ import qualified Data.Set as S
 import HIR.HIR
 import Utils.Common
 
-type DAEFact = S.Set VarId
+type DAEFact = S.Set SSAVar
 
 daeLattice :: DataflowLattice DAEFact
 daeLattice = DataflowLattice {

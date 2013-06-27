@@ -2,9 +2,8 @@
 {-# LANGUAGE GADTs, RankNTypes, StandaloneDeriving #-}
 
 module HIR.HIR(termToHIR, HNode(..), HFunction(..),
-               VarId, InpId, ResId, getVarsRead, getVarsWritten,
-               hirDebugShowGraph)
-       where
+               InpId, ResId, getVarsRead, getVarsWritten,
+               hirDebugShowGraph) where
 
 import qualified Data.List as L
 import qualified Data.Map as M
@@ -12,6 +11,8 @@ import qualified Data.Maybe as Mby
 import qualified Data.Set as S
 import qualified Control.Monad.State as St
 import Compiler.Hoopl
+import qualified Text.Printf as T
+
 
 import Source.Ast
 import Utils.Common
@@ -56,7 +57,6 @@ openLambdas (BinT op left right) =
 
 {- After the openLambdas phase, we "lift" the lambda bodies out of their
  - invocation point into separate Functions. -}
-type FunctionId = Int
 type ArgId = Int
 data LiftedFunction = LiftedFunction FunctionId Int LiftedTerm deriving(Show, Ord, Eq)
 data LiftedTerm = ArgLT ArgId | IntLT Int | BoolLT Bool | FuncLT FunctionId
@@ -102,9 +102,8 @@ liftTerm = liftWithEnv M.empty
 {-  HNode defines an SSA IR to which we transform each function for
  -  mization.It uses the Hoopl library.  The 'H' stands for 'high-level' -}
 
-type VarId = Int
-type InpId = VarId
-type ResId = VarId
+type InpId = SSAVar
+type ResId = SSAVar
 
 data HNode e x where
   LabelHN :: Label -> HNode C O
@@ -131,13 +130,13 @@ instance NonLocal HNode where
   successors (JumpHN label) = [label]
   successors (ReturnHN _) = []
 
-getVarsRead :: forall e x. HNode e x -> [VarId]
+getVarsRead :: forall e x. HNode e x -> [SSAVar]
 getVarsRead = fst . getVRW
 
-getVarsWritten :: forall e x. HNode e x -> [VarId]
+getVarsWritten :: forall e x. HNode e x -> [SSAVar]
 getVarsWritten = snd . getVRW
 
-getVRW :: forall e x. HNode e x -> ([VarId], [VarId])
+getVRW :: forall e x. HNode e x -> ([SSAVar], [SSAVar])
 getVRW LabelHN{} = ([], [])
 getVRW (LoadArgHN inp out) = ([inp], [out])
 getVRW (LoadBoolLitHN _ out) = ([], [out])
@@ -172,14 +171,14 @@ liftedFunctionToHIR (LiftedFunction fnId argC fullTerm) = do
   return HFunction{hFnName = fnId, hFnArgCount = argC, hFnEntry = entry,
                    hFnBody = fullTermTranslated}
 
-liftedTermToHIR :: LiftedTerm -> HIRMonad (Graph HNode C C, Label)
+liftedTermToHIR :: LiftedTerm -> IRMonad (Graph HNode C C, Label)
 liftedTermToHIR fullTerm = do
   entry <- freshLabel
   (functionBody, resultVar) <- emit fullTerm
   let fullGraph = mkFirst (LabelHN entry) <*> functionBody <*>
                   mkLast (ReturnHN resultVar)
   return (fullGraph, entry)
-  where emit :: LiftedTerm -> HIRMonad (Graph HNode O O, VarId)
+  where emit :: LiftedTerm -> IRMonad (Graph HNode O O, SSAVar)
         emit (ArgLT argId) = loadSimple (LoadArgHN argId)
         emit (IntLT intLit) = loadSimple (LoadIntLitHN intLit)
         emit (BoolLT boolLit) = loadSimple (LoadBoolLitHN boolLit)
@@ -231,22 +230,17 @@ liftedTermToHIR fullTerm = do
         freshVarName = St.StateT (\(name:names) -> return (name, names))
 
 
-type HIRMonad a = St.StateT [VarId] M a
-instance UniqueMonad m => UniqueMonad (St.StateT s m) where
-  freshUnique = St.StateT (\s -> St.liftM (\u -> (u, s)) freshUnique)
-
-
 
 {-  Debugging tools.  -}
 
 hirDebugShowGraph :: M [HFunction] -> String
 hirDebugShowGraph fn =
-  let functionList = runSimpleUniqueMonad $ runWithFuel fuel fn
-  in L.intercalate "\n\n" $ map showHFunction functionList
+  let functionList = runSimpleUniqueMonad $ runWithFuel maxBound fn
+  in unlines $ map showHFunction functionList
   where
+    showHFunction :: HFunction -> String
     showHFunction (HFunction name argC entry body) =
-      "FunctionId = " ++ show name ++ "\n" ++
-      "ArgCount  = " ++ show argC ++ "\n" ++
-      "EntryLabel = " ++ show entry ++ "\n" ++
-      "Body {\n" ++ showGraph ((++ " ") . show) body ++  "}\n"
-    fuel = 999999
+      let format = unlines ["%s", "FunctionId = %s", "ArgCount = %d",
+                            "EntryLabel = %s", "Body = {", "%s", "}"]
+          functionGraph = showGraph ((++ " ") . show) body
+      in T.printf format name (show argC) (show entry) functionGraph
