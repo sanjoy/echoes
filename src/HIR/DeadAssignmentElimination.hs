@@ -9,6 +9,7 @@ import qualified Data.List as L
 import qualified Data.Set as S
 
 import HIR.HIR
+import Utils.Common
 
 type DAEFact = S.Set VarId
 

@@ -10,6 +10,7 @@ import qualified Data.Map as M
 
 import HIR.HIR
 import Source.Ast
+import Utils.Common
 
 data Constant = IntegerC Int | BooleanC Bool | ClosureC VarId
               deriving(Show, Eq, Ord)

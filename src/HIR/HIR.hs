@@ -1,7 +1,7 @@
 {-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans -i..  #-}
 {-# LANGUAGE GADTs, RankNTypes #-}
 
-module HIR.HIR(M, termToHIR, HNode(..), HFunction(..),
+module HIR.HIR(termToHIR, HNode(..), HFunction(..),
                VarId, InpId, ResId, getVarsRead, getVarsWritten,
                hirDebugShowNode, hirDebugShowGraph)
        where
@@ -14,6 +14,7 @@ import qualified Control.Monad.State as St
 import Compiler.Hoopl
 
 import Source.Ast
+import Utils.Common
 
 getOpenVariables :: S.Set Id -> Term -> S.Set Id
 getOpenVariables env (SymT var) =
@@ -151,8 +152,6 @@ getVRW (ReturnHN inp) = ([inp], [])
 
 data HFunction = HFunction { hFnName :: FunctionId, hFnArgCount :: Int,
                              hFnEntry :: Label, hFnBody :: Graph HNode C C }
-
-type M = CheckingFuelMonad SimpleUniqueMonad
 
 termToHIR :: Term -> Maybe (M [HFunction])
 termToHIR term = if isClosed term then Just compiledTerm else Nothing
