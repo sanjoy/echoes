@@ -11,7 +11,6 @@ import qualified Data.Maybe as Mby
 import qualified Data.Set as S
 import qualified Control.Monad.State as St
 import Compiler.Hoopl
-import qualified Text.Printf as T
 
 
 import Source.Ast
@@ -239,8 +238,8 @@ hirDebugShowGraph fn =
   in unlines $ map showHFunction functionList
   where
     showHFunction :: HFunction -> String
-    showHFunction (HFunction name argC entry body) =
-      let format = unlines ["%s", "FunctionId = %s", "ArgCount = %d",
-                            "EntryLabel = %s", "Body = {", "%s", "}"]
-          functionGraph = showGraph ((++ " ") . show) body
-      in T.printf format name (show argC) (show entry) functionGraph
+    showHFunction (HFunction name argC entry body _) =
+      let functionGraph = showGraph ((++ " ") . show) body
+      in unlines ["FunctionId = " ++ show name, "ArgCount = " ++ show argC,
+                  "EntryLabel = " ++ show entry, "Body = {",
+                  functionGraph ++ "}"]
