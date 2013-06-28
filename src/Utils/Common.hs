@@ -1,15 +1,22 @@
 {-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans -i..  #-}
 {-# LANGUAGE GADTs, RankNTypes, ScopedTypeVariables, ImpredicativeTypes #-}
 
-module Utils.Common(M, FunctionId, SSAVar, IRMonad, freshVarName,
-                    runIRMonad, irGetCustom) where
+module Utils.Common(M, ClsrId, SSAVar, Rator(..), Lit(..), ratorSubstitute,
+                    IRMonad, freshVarName, runIRMonad, irGetCustom) where
 
 import Compiler.Hoopl
 import Control.Monad.State
+import qualified Data.Maybe as Mby
 
 type M = CheckingFuelMonad SimpleUniqueMonad
-type FunctionId = Int
+type ClsrId = Int
 type SSAVar = Int
+data Rator a = LitR a | VarR SSAVar deriving(Show, Eq, Ord)
+data Lit = BoolL Bool | IntL Int | ClsrL ClsrId deriving(Show, Eq, Ord)
+
+ratorSubstitute :: (SSAVar -> Maybe a) -> Rator a -> Rator a
+ratorSubstitute _ v@(LitR _) = v
+ratorSubstitute f v@(VarR var) = Mby.fromMaybe v (liftM LitR $ f var)
 
 type IRMonad custom a = StateT ([SSAVar], custom) M a
 instance UniqueMonad m => UniqueMonad (StateT s m) where

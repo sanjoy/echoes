@@ -12,9 +12,7 @@ import HIR.HIR
 import Source.Ast
 import Utils.Common
 
-data Constant = IntegerC Int | BooleanC Bool | ClosureC SSAVar
-              deriving(Show, Eq, Ord)
-type ConstantFact = M.Map SSAVar (WithTop Constant)
+type ConstantFact = M.Map SSAVar (WithTop Lit)
 
 constantLattice :: DataflowLattice ConstantFact
 constantLattice = DataflowLattice {
@@ -34,9 +32,7 @@ transferConstants = mkFTransfer3 closeOpen openOpen openClose
 
     openOpen :: HNode O O -> ConstantFact -> ConstantFact
     openOpen (LoadArgHN _ var) = hasTop var
-    openOpen (LoadIntLitHN value var) = hasConst var $ IntegerC value
-    openOpen (LoadBoolLitHN value var) = hasConst var $ BooleanC value
-    openOpen (LoadClosureHN value var) = hasConst var $ ClosureC value
+    openOpen (LoadLitHN value var) = hasConst var value
     openOpen (BinOpHN _ _ _ var) = hasTop var
     openOpen (PushHN _ _ var) = hasTop var
     openOpen (ForceHN _ var) = hasTop var
@@ -47,74 +43,90 @@ transferConstants = mkFTransfer3 closeOpen openOpen openClose
     hasConst var value = M.insert var $ PElem value
 
     openClose :: HNode O C -> ConstantFact -> FactBase ConstantFact
-    openClose (IfThenElseHN var tLbl fLbl) f =
+    openClose (IfThenElseHN (VarR var) tLbl fLbl) f =
       mkFactBase constantLattice $ map (
-        \(lbl, value) -> (lbl, M.insert var (PElem $ BooleanC value) f))
+        \(lbl, value) -> (lbl, M.insert var (PElem $ BoolL value) f))
       [(tLbl, True), (fLbl, False)]
+
+    openClose (IfThenElseHN (LitR condition) tLbl fLbl) f =
+      mapSingleton (if condition then tLbl else fLbl) f
     openClose (JumpHN lbl) f = mapSingleton lbl f
     openClose (ReturnHN _) _ = mapEmpty
 
-loadConstant :: Constant -> SSAVar -> HNode O O
-loadConstant (IntegerC intLit) resultVar = LoadIntLitHN intLit resultVar
-loadConstant (BooleanC boolLit) resultVar = LoadBoolLitHN boolLit resultVar
-loadConstant (ClosureC closureLit) resultVar =
-  LoadClosureHN closureLit resultVar
+propagateConstants :: forall m. FuelMonad m => FwdRewrite m HNode ConstantFact
+propagateConstants = mkFRewrite3 closeOpen openOpen openClose
+  where
+    closeOpen _ _ = return Nothing
 
-newtype MaybeWithTop a = MWT (Maybe (WithTop a)) deriving(Show)
-instance Monad MaybeWithTop where
-  return = MWT . Just . PElem
-  MWT (Just (PElem v)) >>= f =
-    case f v of
-      wholeExp@(MWT (Just (PElem _))) -> wholeExp
-      anythingElse -> anythingElse
-  MWT Nothing >>= _ = MWT Nothing
-  MWT (Just Top) >>= _ = MWT $ Just Top
+    lookupI f v = case M.lookup v f of
+      Just (PElem (IntL i)) -> Just i
+      _ -> Nothing
 
-mwtToMby :: MaybeWithTop a -> Maybe a
-mwtToMby (MWT (Just (PElem v))) = Just v
-mwtToMby _ = Nothing
+    lookupB f v = case M.lookup v f of
+      Just (PElem (BoolL b)) -> Just b
+      _ -> Nothing
 
-evaluateNode :: (SSAVar -> MaybeWithTop Constant) -> HNode e x -> Maybe (HNode e x)
-evaluateNode f (BinOpHN op left right result) = mwtToMby $ do
-  leftLit <- f left
-  rightLit <- f right
-  constValue <- functionFor op leftLit rightLit
-  return $ loadConstant constValue result
-  where functionFor :: BinOp -> Constant -> Constant -> MaybeWithTop Constant
-        functionFor PlusOp = massageInt $ liftNativeI (+)
-        functionFor MinusOp = massageInt $ liftNativeI (-)
-        functionFor MultOp = massageInt $ liftNativeI (*)
-        functionFor DivOp = \x y -> if y == IntegerC 0 then MWT Nothing
-                                    else massageInt (liftNativeI div) x y
-        functionFor LtOp = massageInt $ liftNativeB (<)
-        functionFor EqOp = massageInt $ liftNativeB (==)
+    lookupC f v = case M.lookup v f of
+      Just (PElem (ClsrL c)) -> Just c
+      _ -> Nothing
 
-        massageInt :: (Int -> Int -> a) -> Constant -> Constant ->
-                      MaybeWithTop a
-        massageInt baseFn (IntegerC x) (IntegerC y) =
-          MWT $ Just $ PElem $ baseFn x y
-        massageInt _ _ _ = MWT Nothing
+    lookupL f v = case M.lookup v f of
+      Just (PElem lit) -> Just lit
+      _ -> Nothing
 
-        liftNativeI native x y = IntegerC $ native x y
-        liftNativeB native x y = BooleanC $ native x y
-evaluateNode f (Phi2HN (varA, _) (varB, _) result) = mwtToMby $ do
-  constA <- f varA
-  constB <- f varB
-  if constA == constB then return $ loadConstant constA result
-    else MWT Nothing
-evaluateNode f (IfThenElseHN condition tLbl fLbl) = mwtToMby $ do
-  constC <- f condition
-  case constC of
-    BooleanC constCBool -> return . JumpHN $ if constCBool then tLbl else fLbl
-    _ -> MWT Nothing -- TODO: we know this program has an error.
-                     -- Report it somehow.
-evaluateNode f (ForceHN val result) = mwtToMby $ do
-  constVal <- f val
-  return $ loadConstant constVal result
+    openOpen :: FuelMonad m => HNode O O -> ConstantFact -> m (Maybe (Graph HNode O O))
+    openOpen LoadArgHN{} _ = return Nothing
+    openOpen LoadLitHN{} _ = return Nothing
+    openOpen (BinOpHN op left right result) f =
+      let rS = ratorSubstitute $ lookupI f
+      in return $ Just $ mkMiddle $ BinOpHN op (rS left) (rS right) result
+    openOpen (PushHN clsr val result) f =
+      let rSL = ratorSubstitute $ lookupL f
+          rSC = ratorSubstitute $ lookupC f
+      in return $ Just $ mkMiddle $ PushHN (rSC clsr) (rSL val) result
+    openOpen (ForceHN clsr result) f =
+      return $ Just $ mkMiddle $ ForceHN (ratorSubstitute (lookupL f) clsr) result
+    openOpen (Phi2HN (vA, lA) (vB, lB) result) f =
+      let rSL = ratorSubstitute (lookupL f)
+      in return $ Just $ mkMiddle $ Phi2HN (rSL vA, lA) (rSL vB, lB) result
+    openOpen (CopyValueHN val result) f =
+      return $ Just $ mkMiddle $ CopyValueHN (ratorSubstitute (lookupL f) val) result
 
-evaluateNode f (CopyValueHN val result) = mwtToMby $ do
-  constVal <- f val
-  return $ loadConstant constVal result
+    openClose :: FuelMonad m => HNode O C -> ConstantFact -> m (Maybe (Graph HNode O C))
+    openClose (IfThenElseHN c tL fL) f =
+      return $ Just $ mkLast $ IfThenElseHN (ratorSubstitute (lookupB f) c) tL fL
+    openClose JumpHN{} _ = return Nothing
+    openClose (ReturnHN val) f =
+      return $ Just $ mkLast $ ReturnHN (ratorSubstitute (lookupL f) val)
+
+evaluateNode :: (SSAVar -> Maybe (WithTop Lit)) -> HNode e x -> Maybe (HNode e x)
+evaluateNode _ (BinOpHN op (LitR x) (LitR y) result) =
+  Mon.liftM (`LoadLitHN` result) (functionFor op x y)
+  where functionFor :: BinOp -> Int -> Int -> Maybe Lit
+        functionFor PlusOp = liftNativeI (+)
+        functionFor MinusOp = liftNativeI (-)
+        functionFor MultOp = liftNativeI (*)
+        functionFor DivOp =
+          \dividend divisor -> if divisor == 0 then Nothing
+                               else liftNativeI div divisor dividend
+        functionFor LtOp = liftNativeB (<)
+        functionFor EqOp = liftNativeB (==)
+
+        liftNativeI fn l r = Just $ IntL $ fn l r
+        liftNativeB fn l r = Just $ BoolL $ fn l r
+
+evaluateNode _ (Phi2HN (LitR litA, _) (LitR litB, _) result) =
+  if litA == litB then Just $ LoadLitHN litA result
+  else Nothing
+
+evaluateNode _ (IfThenElseHN (LitR condition) tLbl fLbl) =
+  if condition then Just $ JumpHN $ if condition then tLbl else fLbl
+  else Nothing -- TODO: make use of the fact that if the condition
+               -- folds to anything other than a BoolL, we *know* that
+               -- the program has a type error.
+
+evaluateNode _ (ForceHN (LitR lit) result) = Just $ LoadLitHN lit result
+evaluateNode _ (CopyValueHN (LitR lit) result) = Just $ LoadLitHN lit result
 
 evaluateNode _ _ = Nothing
 
@@ -124,16 +136,16 @@ foldConstants = mkFRewrite3 closeOpen openOpen openClose
     closeOpen _ _ = return Nothing -- Nothing we can do for labels.
 
     openOpen node facts =
-      return $ Mon.liftM mkMiddle $ evaluateNode (MWT . flip M.lookup facts) node
+      return $ Mon.liftM mkMiddle $ evaluateNode (`M.lookup` facts) node
 
     openClose node facts =
-      return $ Mon.liftM mkLast $ evaluateNode (MWT . flip M.lookup facts) node
+      return $ Mon.liftM mkLast $ evaluateNode (`M.lookup` facts) node
 
 constantPropagationPass :: FuelMonad m => FwdPass m HNode ConstantFact
 constantPropagationPass = FwdPass {
   fp_lattice = constantLattice,
   fp_transfer = transferConstants,
-  fp_rewrite = foldConstants
+  fp_rewrite = propagateConstants `thenFwdRw` foldConstants
   }
 
 runConstantPropagation :: HFunction -> M HFunction

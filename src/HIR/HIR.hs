@@ -1,9 +1,8 @@
 {-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans -i..  #-}
 {-# LANGUAGE GADTs, RankNTypes, StandaloneDeriving #-}
 
-module HIR.HIR(termToHIR, HNode(..), HFunction(..),
-               InpId, ResId, getVarsRead, getVarsWritten,
-               hirDebugShowGraph) where
+module HIR.HIR(termToHIR, HNode(..), HFunction(..), InpId, ResId,
+               getVarsRead, getVarsWritten, hirDebugShowGraph) where
 
 import qualified Data.List as L
 import qualified Data.Map as M
@@ -57,12 +56,12 @@ openLambdas (BinT op left right) =
 {- After the openLambdas phase, we "lift" the lambda bodies out of their
  - invocation point into separate Functions. -}
 type ArgId = Int
-data LiftedFunction = LiftedFunction FunctionId Int LiftedTerm deriving(Show, Ord, Eq)
-data LiftedTerm = ArgLT ArgId | IntLT Int | BoolLT Bool | FuncLT FunctionId
+data LiftedFunction = LiftedFunction ClsrId Int LiftedTerm deriving(Show, Ord, Eq)
+data LiftedTerm = ArgLT ArgId | IntLT Int | BoolLT Bool | FuncLT ClsrId
                 | AppLT LiftedTerm LiftedTerm | IfLT LiftedTerm LiftedTerm LiftedTerm
                 | BinLT BinOp LiftedTerm LiftedTerm deriving(Show, Ord, Eq)
 
-data LoweringState = LoweringState [LiftedFunction] [FunctionId]
+data LoweringState = LoweringState [LiftedFunction] [ClsrId]
 type LiftM = St.State LoweringState
 
 liftTerm :: Term -> LiftM LiftedTerm
@@ -92,7 +91,7 @@ liftTerm = liftWithEnv M.empty
       liftedRight <- liftWithEnv env right
       return $ BinLT op liftedLeft liftedRight
 
-    createFunction :: Int -> LiftedTerm -> LiftM FunctionId
+    createFunction :: Int -> LiftedTerm -> LiftM ClsrId
     createFunction argC body = do
       (LoweringState fnList (newName:names)) <- St.get
       St.put $ LoweringState (LiftedFunction newName argC body:fnList) names
@@ -108,22 +107,21 @@ data HNode e x where
   LabelHN :: Label -> HNode C O
 
   LoadArgHN :: InpId -> ResId -> HNode O O
-  LoadIntLitHN :: Int -> ResId -> HNode O O
-  LoadBoolLitHN :: Bool -> ResId -> HNode O O
-  LoadClosureHN :: InpId -> ResId -> HNode O O
-  -- Operator -> LeftOp -> RightOp -> Result
-  BinOpHN :: BinOp -> InpId -> InpId -> ResId -> HNode O O
-  -- Function -> Arg -> Result
-  PushHN :: InpId -> InpId -> ResId -> HNode O O
-  ForceHN :: InpId -> ResId -> HNode O O
-  Phi2HN :: (InpId, Label) -> (InpId, Label) -> ResId -> HNode O O
-  -- In essence a no-op; RemoveBadPhis replaces illegal phi nodes with
-  -- this
-  CopyValueHN :: InpId -> ResId -> HNode O O
+  LoadLitHN :: Lit -> ResId -> HNode O O
 
-  IfThenElseHN :: InpId -> Label -> Label -> HNode O C
+  -- Operator -> LeftOp -> RightOp -> Result
+  BinOpHN :: BinOp -> Rator Int -> Rator Int -> ResId -> HNode O O
+  -- Function -> Arg -> Result
+  PushHN :: Rator ClsrId -> Rator Lit -> ResId -> HNode O O
+  ForceHN :: Rator Lit -> ResId -> HNode O O
+  Phi2HN :: (Rator Lit, Label) -> (Rator Lit, Label) -> ResId -> HNode O O
+  -- In essence a no-op; RemoveBadPhis replaces illegal phi nodes with
+  -- this.
+  CopyValueHN :: Rator Lit -> ResId -> HNode O O
+
+  IfThenElseHN :: Rator Bool -> Label -> Label -> HNode O C
   JumpHN :: Label -> HNode O C
-  ReturnHN :: InpId -> HNode O C
+  ReturnHN :: Rator Lit -> HNode O C
 deriving instance Show(HNode e x)
 
 instance NonLocal HNode where
@@ -140,20 +138,23 @@ getVarsWritten = snd . getVRW
 
 getVRW :: forall e x. HNode e x -> ([SSAVar], [SSAVar])
 getVRW LabelHN{} = ([], [])
-getVRW (CopyValueHN inp out) = ([inp], [out])
+getVRW (CopyValueHN inp out) = (ratorToList [inp], [out])
 getVRW (LoadArgHN inp out) = ([inp], [out])
-getVRW (LoadBoolLitHN _ out) = ([], [out])
-getVRW (LoadIntLitHN _ out) = ([], [out])
-getVRW (LoadClosureHN _ out) = ([], [out])
-getVRW (BinOpHN _ inA inB out) = ([inA, inB], [out])
-getVRW (PushHN inA inB out) = ([inA, inB], [out])
-getVRW (ForceHN inp out) = ([inp], [out])
-getVRW (Phi2HN (inA, _) (inB, _) out) = ([inA, inB], [out])
-getVRW (IfThenElseHN inp _ _) = ([inp], [])
+getVRW (LoadLitHN _ out) = ([], [out])
+getVRW (BinOpHN _ inA inB out) = (ratorToList [inA, inB], [out])
+getVRW (PushHN inA inB out) = (ratorToList [inA] ++ ratorToList [inB], [out])
+getVRW (ForceHN inp out) = (ratorToList [inp], [out])
+getVRW (Phi2HN (inA, _) (inB, _) out) = (ratorToList [inA, inB], [out])
+getVRW (IfThenElseHN condition _ _) = (ratorToList [condition], [])
 getVRW JumpHN{} = ([], [])
-getVRW (ReturnHN inp) = ([inp], [])
+getVRW (ReturnHN value) = (ratorToList [value], [])
 
-data HFunction = HFunction { hFnName :: FunctionId, hFnArgCount :: Int,
+ratorToList :: [Rator a] -> [SSAVar]
+ratorToList = concatMap (\r -> case r of
+                            (VarR var) -> [var]
+                            _ -> [])
+
+data HFunction = HFunction { hFnName :: ClsrId, hFnArgCount :: Int,
                              hFnEntry :: Label, hFnBody :: Graph HNode C C,
                              hFnLastSSAVar :: SSAVar }
 
@@ -180,13 +181,13 @@ liftedTermToHIR fullTerm = do
   entry <- freshLabel
   (functionBody, resultVar) <- emit fullTerm
   let fullGraph = mkFirst (LabelHN entry) <*> functionBody <*>
-                  mkLast (ReturnHN resultVar)
+                  mkLast (ReturnHN $ VarR resultVar)
   return (fullGraph, entry)
   where emit :: LiftedTerm -> IRMonad () (Graph HNode O O, SSAVar)
         emit (ArgLT argId) = loadSimple (LoadArgHN argId)
-        emit (IntLT intLit) = loadSimple (LoadIntLitHN intLit)
-        emit (BoolLT boolLit) = loadSimple (LoadBoolLitHN boolLit)
-        emit (FuncLT functionId) = loadSimple (LoadClosureHN functionId)
+        emit (IntLT intLit) = loadSimple (LoadLitHN $ IntL intLit)
+        emit (BoolLT boolLit) = loadSimple (LoadLitHN $ BoolL boolLit)
+        emit (FuncLT clsrId) = loadSimple (LoadLitHN $ ClsrL clsrId)
         emit (AppLT function arg) = do
           (functionCode, functionVar) <- emit function
           (argCode, argVar) <- emit arg
@@ -194,8 +195,9 @@ liftedTermToHIR fullTerm = do
           resultVar <- freshVarName
           let finalBody = functionCode <*>
                           argCode <*>
-                          mkMiddle (ForceHN functionVar forcedFnVar) <*>
-                          mkMiddle (PushHN forcedFnVar argVar resultVar)
+                          mkMiddle (ForceHN (VarR functionVar) forcedFnVar) <*>
+                          mkMiddle (PushHN (VarR forcedFnVar) (VarR argVar)
+                                    resultVar)
           return (finalBody, resultVar)
         emit (IfLT condition trueBranch falseBranch) = do
           (conditionCode, condVar) <- emit condition
@@ -205,10 +207,12 @@ liftedTermToHIR fullTerm = do
           (tCode, tLabel, tRes) <- emitIfBranch trueBranch finalLabel
           (fCode, fLabel, fRes) <- emitIfBranch falseBranch finalLabel
           let ifThenElse =
-                conditionCode <*> mkMiddle (ForceHN condVar forcedCondVar) <*>
-                mkLast (IfThenElseHN forcedCondVar tLabel fLabel) |*><*|
+                conditionCode <*>
+                mkMiddle (ForceHN (VarR condVar) forcedCondVar) <*>
+                mkLast (IfThenElseHN (VarR forcedCondVar) tLabel fLabel) |*><*|
                 tCode |*><*| fCode |*><*| mkFirst (LabelHN finalLabel) <*>
-                mkMiddle (Phi2HN (tRes, tLabel) (fRes, fLabel) resultVar)
+                mkMiddle (Phi2HN (VarR tRes, tLabel)
+                          (VarR fRes, fLabel) resultVar)
           return (ifThenElse, resultVar)
         emit (BinLT op left right) = do
           (leftG, leftVar) <- emit left
@@ -218,9 +222,10 @@ liftedTermToHIR fullTerm = do
           resultVar <- freshVarName
           let computeBinOp =
                 leftG <*> rightG <*> mkMiddles [
-                  ForceHN leftVar forcedLeftVar,
-                  ForceHN rightVar forcedRightVar,
-                  BinOpHN op forcedLeftVar forcedRightVar resultVar]
+                  ForceHN (VarR leftVar) forcedLeftVar,
+                  ForceHN (VarR rightVar) forcedRightVar,
+                  BinOpHN op (VarR forcedLeftVar) (VarR forcedRightVar)
+                  resultVar]
           return (computeBinOp, resultVar)
 
         loadSimple loader = do varName <- freshVarName
@@ -244,6 +249,6 @@ hirDebugShowGraph fn =
     showHFunction :: HFunction -> String
     showHFunction (HFunction name argC entry body _) =
       let functionGraph = showGraph ((++ " ") . show) body
-      in unlines ["FunctionId = " ++ show name, "ArgCount = " ++ show argC,
+      in unlines ["ClsrId = " ++ show name, "ArgCount = " ++ show argC,
                   "EntryLabel = " ++ show entry, "Body = {",
                   functionGraph ++ "}"]
