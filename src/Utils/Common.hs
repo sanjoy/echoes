@@ -1,7 +1,7 @@
 {-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans -i..  #-}
 {-# LANGUAGE GADTs, RankNTypes, ScopedTypeVariables, ImpredicativeTypes #-}
 
-module Utils.Common(M, ClsrId, SSAVar, Rator(..), Lit(..), ratorSubstitute,
+module Utils.Common(M, ClsrId, SSAVar, Rator(..), ratorSubstitute,
                     IRMonad, freshVarName, runIRMonad, irGetCustom,
                     irPutCustom) where
 
@@ -13,7 +13,6 @@ type M = CheckingFuelMonad SimpleUniqueMonad
 type ClsrId = Int
 type SSAVar = Int
 data Rator a = LitR a | VarR SSAVar deriving(Show, Eq, Ord)
-data Lit = BoolL Bool | IntL Int | ClsrL ClsrId deriving(Show, Eq, Ord)
 
 ratorSubstitute :: (SSAVar -> Maybe a) -> Rator a -> Rator a
 ratorSubstitute _ v@(LitR _) = v

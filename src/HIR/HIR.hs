@@ -1,7 +1,7 @@
 {-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans -i..  #-}
 {-# LANGUAGE GADTs, RankNTypes, StandaloneDeriving #-}
 
-module HIR.HIR(termToHIR, HNode(..), HFunction(..), InpId, ResId,
+module HIR.HIR(termToHIR, HNode(..), HFunction(..), InpId, ResId, Lit(..),
                getVarsRead, getVarsWritten, hirDebugShowGraph) where
 
 import qualified Data.List as L
@@ -102,6 +102,7 @@ liftTerm = liftWithEnv M.empty
 
 type InpId = SSAVar
 type ResId = SSAVar
+data Lit = BoolL Bool | IntL Int | ClsrL ClsrId deriving(Show, Eq, Ord)
 
 data HNode e x where
   LabelHN :: Label -> HNode C O
