@@ -77,7 +77,7 @@ data LBinOp = BitAndLOp | BitOrLOp | BitXorLOp | AddLOp | SubLOp | MultLOp
 data LNode e x where
   LabelLN :: Label -> LNode C O
 
-  LoadLitWordLN :: Int -> SSAVar -> LNode O O
+  CopyWordLN :: Rator Constant -> SSAVar -> LNode O O
   LoadWordLN :: LSymAddress -> SSAVar -> LNode O O
   StoreWordLN :: LSymAddress -> Rator Constant -> LNode O O
   CmpWordLN :: Rator Constant -> Rator Constant -> LNode O O
@@ -87,7 +87,6 @@ data LNode e x where
   Phi2LN :: (Rator Constant, Label) -> (Rator Constant, Label) -> SSAVar ->
             LNode O O
   CallLN :: Rator ClsrId -> [Rator Constant] -> LNode O O
-  CopyValueLN :: Rator Constant -> SSAVar -> LNode O O
   CallRuntimeLN :: RuntimeFn -> SSAVar -> LNode O O
 
   PanicLN :: String -> LNode O C
@@ -130,7 +129,7 @@ hirToLIR hFn = do
     nodeMapFn (LoadLitHN (ClsrL clsrId) out) = genCreateClosure clsrId out
 
     nodeMapFn (LoadLitHN lit out) =
-      return $ mkMiddle $ LoadLitWordLN (litToWord lit) out
+      return $ mkMiddle $ CopyWordLN (litToWord lit) out
 
     nodeMapFn (BinOpHN op inA inB out) =
       let genAssertTagI (VarR var) = genAssertTag (VarR var) IntTagC
@@ -194,11 +193,11 @@ hirToLIR hFn = do
 
     nodeMapFn (ForceHN lit result) = do
       (valCode, valConst) <- ratorLitToConstant lit
-      return $ valCode <*> mkMiddle (CopyValueLN valConst result)
+      return $ valCode <*> mkMiddle ( valConst result)
 
     nodeMapFn (CopyValueHN value result) = do
       (valCode, valConst) <- ratorLitToConstant value
-      return $ valCode <*> mkMiddle (CopyValueLN valConst result)
+      return $ valCode <*> mkMiddle (CopyWordLN valConst result)
 
     nodeMapFn (IfThenElseHN condition tLbl fLbl) =
       let cmp = CmpWordLN (ratorBoolToConstant condition) (LitR BoolTrueC)
