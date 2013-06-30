@@ -128,8 +128,9 @@ hirToLIR hFn = do
 
     nodeMapFn (LoadLitHN (ClsrL clsrId) out) = genCreateClosure clsrId out
 
-    nodeMapFn (LoadLitHN lit out) =
-      return $ mkMiddle $ CopyWordLN (litToWord lit) out
+    nodeMapFn (LoadLitHN lit out) = do
+      (code, value) <- litToConstant lit
+      return $ code <*> mkMiddle (CopyWordLN value out)
 
     nodeMapFn (BinOpHN op inA inB out) =
       let genAssertTagI (VarR var) = genAssertTag (VarR var) IntTagC
@@ -193,7 +194,7 @@ hirToLIR hFn = do
 
     nodeMapFn (ForceHN lit result) = do
       (valCode, valConst) <- ratorLitToConstant lit
-      return $ valCode <*> mkMiddle ( valConst result)
+      return $ valCode <*> mkMiddle (CopyWordLN valConst result)
 
     nodeMapFn (CopyValueHN value result) = do
       (valCode, valConst) <- ratorLitToConstant value
@@ -315,20 +316,20 @@ hirToLIR hFn = do
     ratorBoolToConstant (VarR v) = VarR v
     ratorBoolToConstant (LitR b) = LitR (if b then BoolTrueC else BoolFalseC)
 
-    ratorLitToConstant :: Rator Lit -> IRMonad PanicMap (Graph LNode O O,
-                                                         Rator Constant)
-    ratorLitToConstant (VarR v) = return (emptyGraph, VarR v)
-    ratorLitToConstant (LitR (ClsrL clsr)) = do
+    litToConstant :: Lit -> IRMonad PanicMap (Graph LNode O O, Rator Constant)
+    litToConstant (ClsrL clsr) = do
       clsrVar <- freshVarName
       clsrCode <- genCreateClosure clsr clsrVar
       return (clsrCode, VarR clsrVar)
-    ratorLitToConstant (LitR lit) =
-      return (emptyGraph, LitR $ WordC $ litToWord lit)
+    litToConstant (BoolL b) =
+      return (emptyGraph,
+              LitR $ WordC $ ((if b then 1 else 0) `B.shift` 2) `B.setBit` 1)
+    litToConstant (IntL i) = return (emptyGraph, LitR $ WordC $ i `B.shift` 2)
 
-    litToWord (BoolL b) = ((if b then 1 else 0) `B.shift` 2) `B.setBit` 1
-    litToWord (IntL i) = i `B.shift` 2
-    litToWord (ClsrL op) =
-      error $ "logic error: litToWord called incorrectly with ClsrL " ++ show op
+    ratorLitToConstant :: Rator Lit -> IRMonad PanicMap (Graph LNode O O,
+                                                         Rator Constant)
+    ratorLitToConstant (VarR v) = return (emptyGraph, VarR v)
+    ratorLitToConstant (LitR lit) = litToConstant lit
 
     hOpToLOp PlusOp = AddLOp
     hOpToLOp MinusOp = SubLOp
