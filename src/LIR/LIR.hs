@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans -i..  #-}
+{-# OPTIONS_GHC -Wall -Werror -i.. #-}
 {-# LANGUAGE GADTs, RankNTypes, StandaloneDeriving #-}
 
 module LIR.LIR(hirToLIR, Offset(..), RuntimeFn(..), StructId(..),

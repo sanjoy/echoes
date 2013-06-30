@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -Wall -Werror  -fno-warn-orphans -i..  #-}
+{-# OPTIONS_GHC -Wall -Werror -i..  #-}
 {-# LANGUAGE GADTs, RankNTypes, ScopedTypeVariables #-}
 
 module Utils.Graph(mapConcatGraph, mapConcatGraph') where
