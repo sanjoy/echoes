@@ -1,4 +1,4 @@
-.PHONY: echoes clean lint   #  let ghc --make handle the dependencies.
+.PHONY: echoes clean lint lint-nocolor   #  let ghc --make handle the dependencies.
 
 OBJECT_DIR=output
 INTERFACE_DIR=output
@@ -20,3 +20,6 @@ clean:
 
 lint:
 	find . -name '*hs' | xargs hlint --color
+
+lint-nocolor:
+	find . -name '*hs' | xargs hlint
