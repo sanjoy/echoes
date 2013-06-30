@@ -1,8 +1,9 @@
 {-# OPTIONS_GHC -Wall -Werror -i.. #-}
-{-# LANGUAGE GADTs, RankNTypes, StandaloneDeriving #-}
+{-# LANGUAGE GADTs, RankNTypes, StandaloneDeriving, TypeSynonymInstances,
+    FlexibleInstances #-}
 
 module LIR.LIR(hirToLIR, Offset(..), RuntimeFn(..), StructId(..),
-               JCondition(..), Constant(..), LBinOp(..), LNode(..),
+               JCondition(..), Constant(..), LBinOp(..), LNode, GenLNode(..),
                LFunction(..), PanicMap, lirDebugShowGraph)
        where
 
@@ -74,41 +75,44 @@ data LBinOp = BitAndLOp | BitOrLOp | BitXorLOp | AddLOp | SubLOp | MultLOp
             | DivLOp | LShiftLOp | RShiftLOp
             deriving(Show, Eq, Ord)
 
-data LNode e x where
-  LabelLN :: Label -> LNode C O
+data GenLNode r e x where
+  LabelLN :: Label -> GenLNode r C O
 
-  CopyWordLN :: Rator Constant -> SSAVar -> LNode O O
-  LoadWordLN :: LSymAddress -> SSAVar -> LNode O O
-  StoreWordLN :: LSymAddress -> Rator Constant -> LNode O O
-  CmpWordLN :: Rator Constant -> Rator Constant -> LNode O O
-  CondMove :: JCondition -> Rator Constant -> Rator Constant -> SSAVar ->
-              LNode O O
-  BinOpLN :: LBinOp -> Rator Constant -> Rator Constant -> SSAVar -> LNode O O
-  Phi2LN :: (Rator Constant, Label) -> (Rator Constant, Label) -> SSAVar ->
-            LNode O O
-  CallLN :: Rator ClsrId -> [Rator Constant] -> LNode O O
-  CallRuntimeLN :: RuntimeFn -> SSAVar -> LNode O O
+  CopyWordLN :: GenRator r Constant -> r -> GenLNode r O O
+  LoadWordLN :: LSymAddress -> r -> GenLNode r O O
+  StoreWordLN :: LSymAddress -> GenRator r Constant -> GenLNode r O O
+  CmpWordLN :: GenRator r Constant -> GenRator r Constant -> GenLNode r O O
+  CondMove :: JCondition -> GenRator r Constant -> GenRator r Constant ->
+              r -> GenLNode r O O
+  BinOpLN :: LBinOp -> GenRator r Constant -> GenRator r Constant -> r ->
+             GenLNode r O O
+  Phi2LN :: (GenRator r Constant, Label) -> (GenRator r Constant, Label) ->
+            r -> GenLNode r O O
+  CallLN :: GenRator r ClsrId -> [GenRator r Constant] -> GenLNode r O O
+  CallRuntimeLN :: RuntimeFn -> r -> GenLNode r O O
 
-  PanicLN :: String -> LNode O C
+  PanicLN :: String -> GenLNode r O C
   CJumpLN :: JCondition -> Label {- True -} -> Label {- Fallthrough -} ->
-             LNode O C
-  JumpLN :: Label -> LNode O C
-  ReturnLN :: Rator Constant -> LNode O C
+             GenLNode r O C
+  JumpLN :: Label -> GenLNode r O C
+  ReturnLN :: GenRator r Constant -> GenLNode r O C
+
+type LNode = GenLNode SSAVar
 deriving instance Show(LNode e x)
 
-instance NonLocal LNode where
+instance NonLocal (GenLNode r) where
   entryLabel (LabelLN label) = label
   successors PanicLN{} = []
   successors (CJumpLN _ lblA lblB) = [lblA, lblB]
   successors (JumpLN lbl) = [lbl]
   successors (ReturnLN _) = []
 
-data LFunction = LFunction { lFnName :: ClsrId, lFnArgCount :: Int,
-                             lFnEntry :: Label, lFnBody :: Graph LNode C C }
+data LFunction r = LFunction { lFnName :: ClsrId, lFnArgCount :: Int,
+                               lFnEntry :: Label, lFnBody :: Graph (GenLNode r) C C }
 
 type PanicMap = (M.Map String (Label, Graph LNode C C))
 
-hirToLIR :: HFunction -> M LFunction
+hirToLIR :: HFunction -> M (LFunction SSAVar)
 hirToLIR hFn = do
   let hGraph = hFnBody hFn
       oldSSALimit = hFnLastSSAVar hFn
@@ -339,12 +343,12 @@ hirToLIR hFn = do
       error $ "logic error: hOpToLOp called incorrectly with " ++ show op
 
 
-lirDebugShowGraph :: M [LFunction] -> String
+lirDebugShowGraph :: M [LFunction SSAVar] -> String
 lirDebugShowGraph fn =
   let functionList = runSimpleUniqueMonad $ runWithFuel maxBound fn
   in unlines $ map showLFunction functionList
   where
-    showLFunction :: LFunction -> String
+    showLFunction :: LFunction SSAVar -> String
     showLFunction (LFunction name argC entry body) =
       let functionGraph = showGraph ((++ " ") . show) body
       in unlines ["ClsrId = " ++ show name, "ArgCount = " ++ show argC,
