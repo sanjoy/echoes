@@ -2,7 +2,8 @@
 {-# LANGUAGE GADTs, RankNTypes, ScopedTypeVariables, ImpredicativeTypes #-}
 
 module Utils.Common(M, ClsrId, SSAVar, Rator(..), Lit(..), ratorSubstitute,
-                    IRMonad, freshVarName, runIRMonad, irGetCustom) where
+                    IRMonad, freshVarName, runIRMonad, irGetCustom,
+                    irPutCustom) where
 
 import Compiler.Hoopl
 import Control.Monad.State
@@ -32,3 +33,6 @@ runIRMonad monad ssaVarInit cInit = do
 
 irGetCustom :: IRMonad custom custom
 irGetCustom = liftM snd get
+
+irPutCustom :: custom -> IRMonad custom ()
+irPutCustom s = get >>= (\(a, _) -> put (a, s))

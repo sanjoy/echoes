@@ -1,7 +1,10 @@
 {-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans -i..  #-}
 {-# LANGUAGE GADTs, RankNTypes, StandaloneDeriving #-}
 
-module LIR.LIR where
+module LIR.LIR(hirToLIR, Offset(..), RuntimeFn(..), StructId(..),
+               JCondition(..), Constant(..), LBinOp(..), LNode(..),
+               LFunction(..), PanicMap, lirDebugShowGraph)
+       where
 
 import Compiler.Hoopl
 import qualified Data.Bits as B
@@ -14,10 +17,39 @@ import Utils.Graph
 
 -- Tags
 --
---  * Integers -              00
---  * ClosureNodes -          01
---  * ClosureBase -           11
---  * Booleans -              10
+
+--- Object layout
+
+--  Pointers to objects are always tagged, using the two least
+--  significant bits.  The tag values are
+--
+--   * Integers -              00
+--   * Booleans -              10
+--   * ClosureNode -           01
+--   * ClosureBase -           11
+--
+--  ClosureNodes and ClosureBases are tagged pointers to heap
+--  allocated objects.  For integers, the higher 30 / 62 bits first
+--  word holds a fixed-width integer and for booleans the value is
+--  held by the third lowest bit.
+--
+--   * Closures: closures are represented by a linked list of objects.
+--   The last node of the linked list has the type ClosureBase; and
+--   has the layout
+--
+--        ++++++++++++++++++++++++++++++++++
+--        |               |                |
+--        | Code Pointer  | Argument count |
+--        |               |                |
+--        ++++++++++++++++++++++++++++++++++
+--
+--     Other nodes of this linked list have the layout
+--
+--        +++++++++++++++++++++++++++++++++++++++++++++++++
+--        |              |                |               |
+--        | Next Pointer | Arguments left | This argument |
+--        |              |                |               |
+--        +++++++++++++++++++++++++++++++++++++++++++++++++
 
 -- "Symbolic" addresses.  We haven't lowered these into concrete
 -- calculations yet.
@@ -29,13 +61,14 @@ data LSymAddress = ArgsPtrLSA Int
 data Offset = AppsLeftO | NextPtrO | NodeValueO | CodePtrO
             deriving(Show, Eq, Ord)
 
-data RuntimeFn = AllocStructFn StructId deriving(Show, Eq, Ord)
+data RuntimeFn = AllocStructFn StructId | ForceFn (Rator Constant)
+               deriving(Show, Eq, Ord)
 data StructId = ClsrST ClsrId | ClsrAppNodeST deriving(Show, Eq, Ord)
-data JCondition = JE | JL | JG | Unconditional deriving(Show, Eq, Ord)
+data JCondition = JE | JL | JG | JNE deriving(Show, Eq, Ord)
 data Constant = WordC Int | ClsrSizeC ClsrId | ClsrAppLimitC ClsrId
               | ClsrCodePtrC ClsrId | ClsrBaseTagC | ClsrNodeTagC
               | ClsrTagC | IntTagC | BoolTagC | BoolTrueC | BoolFalseC
-              deriving(Show, Eq, Ord)
+              | ClearTagBitsC deriving(Show, Eq, Ord)
 
 data LBinOp = BitAndLOp | BitOrLOp | BitXorLOp | AddLOp | SubLOp | MultLOp
             | DivLOp | LShiftLOp | RShiftLOp
@@ -76,12 +109,16 @@ data LFunction = LFunction { lFnName :: ClsrId, lFnArgCount :: Int,
 
 type PanicMap = (M.Map String (Label, Graph LNode C C))
 
-hirToLIR :: SSAVar -> Graph HNode C C -> M (Graph LNode C C)
-hirToLIR oldLimit hGraph = do
-  (lGraph, _, _) <- runIRMonad (mapConcatGraph (nodeMapFn, nodeMapFn, nodeMapFn)
-                                hGraph)
-                   oldLimit M.empty
-  return lGraph
+hirToLIR :: HFunction -> M LFunction
+hirToLIR hFn = do
+  let hGraph = hFnBody hFn
+      oldSSALimit = hFnLastSSAVar hFn
+  (lGraph, _, panicLbls) <- runIRMonad (mapConcatGraph (nodeMapFn, nodeMapFn, nodeMapFn)
+                                        hGraph)
+                   oldSSALimit M.empty
+  let finalGraph = foldl (|*><*|) lGraph $ map snd $ M.elems panicLbls
+  return LFunction{lFnName = hFnName hFn, lFnArgCount = hFnArgCount hFn,
+                   lFnEntry = hFnEntry hFn, lFnBody = finalGraph}
   where
     nodeMapFn :: HNode e x -> IRMonad PanicMap (Graph LNode e x)
 
@@ -95,37 +132,73 @@ hirToLIR oldLimit hGraph = do
     nodeMapFn (LoadLitHN lit out) =
       return $ mkMiddle $ LoadLitWordLN (litToWord lit) out
 
-    nodeMapFn (BinOpHN op inA inB out) = do
-      assertLeft <- genAssertTag inA IntTagC
-      assertRight <- genAssertTag inB IntTagC
-      let [inA', inB'] = map ratorIntToConstant [inA, inB]
-      actualOp <- case op of
-        DivOp -> genDivison inA' inB' out
-        MultOp -> genMultiplication inA' inB' out
-        LtOp -> genCmp LtOp inA' inB' out
-        EqOp -> genCmp EqOp inA' inB' out
-        _ -> genAddSubOp op inA' inB' out
-      return $ assertLeft <*> assertRight <*> actualOp
+    nodeMapFn (BinOpHN op inA inB out) =
+      let genAssertTagI (VarR var) = genAssertTag (VarR var) IntTagC
+          genAssertTagI (LitR _) = return emptyGraph
+          [inA', inB'] = map ratorIntToConstant [inA, inB]
+      in do
+        assertLeft <- genAssertTagI inA
+        assertRight <- genAssertTagI inB
+        actualOp <- case op of
+          DivOp -> genDivison inA' inB' out
+          MultOp -> genMultiplication inA' inB' out
+          LtOp -> genCmp LtOp inA' inB' out
+          EqOp -> genCmp EqOp inA' inB' out
+          _ -> genAddSubOp op inA' inB' out
+        return $ assertLeft <*> assertRight <*> actualOp
 
-    nodeMapFn (Phi2HN (inA, lblA) (inB, lblB) out) =
-      let [inA', inB'] = map ratorLitToConstant [inA, inB]
-      in return $ mkMiddle $ Phi2LN (inA', lblA) (inB', lblB) out
+    nodeMapFn (Phi2HN (inA, lblA) (inB, lblB) out) = do
+      [(codeA', inA'), (codeB', inB')] <- mapM ratorLitToConstant [inA, inB]
+      return $ codeA' <*> codeB' <*>
+        mkMiddle (Phi2LN (inA', lblA) (inB', lblB) out)
 
     nodeMapFn (PushHN (VarR clsrVar) value out) = do
-      assertT <- genAssertTag clsrVar ClsrTagC
-      actualPush <- genPush clsrVar (ratorLitToConstant value) out
-      return $ assertT <*> actualPush
+      assertT <- genAssertTag (VarR clsrVar) ClsrTagC
+      (code', value') <- ratorLitToConstant value
+      actualPush <- genPush clsrVar value' out
+      return $ assertT <*> code' <*> actualPush
 
     nodeMapFn (PushHN (LitR clsrLit) value out) = do
       clsrVar <- freshVarName
       creationCode <- genCreateClosure clsrLit clsrVar
-      actualPush <- genPush clsrVar (ratorLitToConstant value) out
-      return $ creationCode <*> actualPush
+      (code', value') <- ratorLitToConstant value
+      actualPush <- genPush clsrVar value' out
+      return $ creationCode <*> code' <*> actualPush
 
-    nodeMapFn ForceHN{} = undefined
+    nodeMapFn (ForceHN (VarR value) result) = do
+      tag <- freshVarName
+      notNeeded <- freshLabel
+      isClosure <- freshLabel
+      let checkIfClosure = mkMiddles [
+            BinOpLN BitAndLOp (VarR value) (LitR ClsrTagC) tag,
+            CmpWordLN (VarR tag) (LitR ClsrTagC) ] <*>
+                           mkLast (CJumpLN JNE notNeeded isClosure)
+      appsLeft <- freshVarName
+      tagCleared <- freshVarName
+      forcingNeeded <- freshLabel
+      let checkIfSaturated =
+            mkFirst (LabelLN isClosure) <*>
+            mkMiddles [
+              BinOpLN BitAndLOp (LitR ClearTagBitsC) (VarR value) tagCleared,
+              LoadWordLN (VarPlusSymL tagCleared AppsLeftO) appsLeft,
+              CmpWordLN (VarR appsLeft) (LitR (WordC 0)) ] <*>
+            mkLast (CJumpLN JNE notNeeded forcingNeeded)
+      allDone <- freshLabel
+      let doForce =
+            mkFirst (LabelLN forcingNeeded) <*>
+            mkMiddle (CallRuntimeLN (ForceFn (VarR tagCleared)) result) <*>
+            mkLast (JumpLN allDone)
+      let finalBlock = mkFirst (LabelLN allDone)
+      return $ checkIfClosure |*><*| checkIfSaturated |*><*| doForce |*><*|
+        finalBlock
 
-    nodeMapFn (CopyValueHN value result) =
-      return $ mkMiddle $ CopyValueLN (ratorLitToConstant value) result
+    nodeMapFn (ForceHN lit result) = do
+      (valCode, valConst) <- ratorLitToConstant lit
+      return $ valCode <*> mkMiddle (CopyValueLN valConst result)
+
+    nodeMapFn (CopyValueHN value result) = do
+      (valCode, valConst) <- ratorLitToConstant value
+      return $ valCode <*> mkMiddle (CopyValueLN valConst result)
 
     nodeMapFn (IfThenElseHN condition tLbl fLbl) =
       let cmp = CmpWordLN (ratorBoolToConstant condition) (LitR BoolTrueC)
@@ -134,24 +207,35 @@ hirToLIR oldLimit hGraph = do
 
     nodeMapFn (JumpHN lbl) = return $ mkLast $ JumpLN lbl
 
-    nodeMapFn (ReturnHN value) =
-      return $ mkLast $ ReturnLN $ ratorLitToConstant value
+    nodeMapFn (ReturnHN value) = do
+      (valCode, valConst) <- ratorLitToConstant value
+      return $ valCode <*> mkLast (ReturnLN valConst)
 
+    genPush :: SSAVar -> Rator Constant -> SSAVar -> IRMonad PanicMap (Graph LNode O O)
     genPush clsrVar value newNode = do
-      (validityCheck, appsLeft) <- checkPushValid clsrVar
+      (validityCheck, appsLeft) <- checkPushValid (VarR clsrVar)
       appsLeft' <- freshVarName
-      taggedNext <- freshVarName
+      freshNode <- freshVarName
       return $ validityCheck <*>
         mkMiddles [
           BinOpLN SubLOp (VarR appsLeft) (LitR (WordC 1)) appsLeft',
-          CallRuntimeLN (AllocStructFn ClsrAppNodeST) newNode,
-          StoreWordLN (VarPlusSymL newNode AppsLeftO) (VarR appsLeft'),
-          BinOpLN BitOrLOp (VarR clsrVar) (LitR ClsrNodeTagC) taggedNext,
-          StoreWordLN (VarPlusSymL newNode NextPtrO) (VarR taggedNext),
-          StoreWordLN (VarPlusSymL newNode NodeValueO) value
-          ]
+          CallRuntimeLN (AllocStructFn ClsrAppNodeST) freshNode,
+          StoreWordLN (VarPlusSymL freshNode AppsLeftO) (VarR appsLeft'),
+          StoreWordLN (VarPlusSymL freshNode NextPtrO) (VarR clsrVar),
+          StoreWordLN (VarPlusSymL freshNode NodeValueO) value,
+          BinOpLN BitOrLOp (LitR ClsrNodeTagC) (VarR freshNode) newNode ]
 
-    checkPushValid = undefined
+    checkPushValid var = do
+      panicLbl <- getPanicLabel "too many pushes!"
+      appsLeft <- freshVarName
+      pushOkay <- freshLabel
+      untaggedVar <- freshVarName
+      return (mkMiddles [
+                 BinOpLN BitAndLOp (LitR ClearTagBitsC) var untaggedVar,
+                 LoadWordLN (VarPlusSymL untaggedVar AppsLeftO) appsLeft,
+                 CmpWordLN (VarR appsLeft) (LitR (WordC 0)) ] <*>
+              mkLast (CJumpLN JE panicLbl pushOkay) |*><*|
+              mkFirst (LabelLN pushOkay), appsLeft)
 
     genCmp op inA inB out = return $ mkMiddles [
       CmpWordLN inA inB,
@@ -159,38 +243,72 @@ hirToLIR oldLimit hGraph = do
 
     opToJC LtOp = JL
     opToJC EqOp = JE
-    opToJC _ = error "logic error"
+    opToJC op =
+      error $ "logic error: opToJC called incorrectly with " ++ show op
 
-    genMultiplication inA inB out = do
+    genMultiplication inA inB result = do
       aRShifted <- freshVarName
       return $ mkMiddles [
         BinOpLN RShiftLOp inA (LitR (WordC 2)) aRShifted,
-        BinOpLN MultLOp inB (VarR aRShifted) out
-        ]
+        BinOpLN MultLOp inB (VarR aRShifted) result ]
 
-    genDivison inA inB out = do
+    genDivison inA inB result = do
       leftIsZero <- getPanicLabel "division by zero!"
       leftIsNotZero <- freshLabel
+      resultUnshifted <- freshVarName
       let zeroCheck = mkMiddle (CmpWordLN inB (LitR (WordC 0))) <*>
                       mkLast (CJumpLN JE leftIsZero leftIsNotZero)
       return $ zeroCheck |*><*|
         mkFirst (LabelLN leftIsNotZero) <*>
-        mkMiddle (BinOpLN DivLOp inA inB out)
+        mkMiddles [ BinOpLN DivLOp inA inB resultUnshifted,
+                    BinOpLN RShiftLOp (VarR resultUnshifted) (LitR (WordC 2))
+                    result ]
 
-    genAddSubOp op inA inB out =
-      return $ mkMiddle $ BinOpLN (hOpToLOp op) inA inB out
+    genAddSubOp op inA inB result =
+      return $ mkMiddle $ BinOpLN (hOpToLOp op) inA inB result
 
     genCreateClosure :: ClsrId -> SSAVar -> IRMonad PanicMap (Graph LNode O O)
-    genCreateClosure clsrId ssaVar = do
-      taggedClsr <- freshVarName
+    genCreateClosure clsrId result = do
+      untaggedClsr <- freshVarName
       return $ mkMiddles [
-        CallRuntimeLN (AllocStructFn (ClsrST clsrId)) ssaVar,
-        StoreWordLN (VarPlusSymL ssaVar AppsLeftO) (LitR (ClsrAppLimitC clsrId)),
-        BinOpLN BitOrLOp (LitR ClsrBaseTagC) (VarR ssaVar) taggedClsr,
-        StoreWordLN (VarPlusSymL ssaVar CodePtrO) (VarR taggedClsr) ]
+        CallRuntimeLN (AllocStructFn (ClsrST clsrId)) untaggedClsr,
+        StoreWordLN (VarPlusSymL untaggedClsr AppsLeftO) (LitR (ClsrAppLimitC clsrId)),
+        StoreWordLN (VarPlusSymL untaggedClsr CodePtrO) (LitR (ClsrCodePtrC clsrId)),
+        BinOpLN BitOrLOp (LitR ClsrBaseTagC) (VarR untaggedClsr) result ]
 
-    genAssertTag = undefined
-    getPanicLabel = undefined
+    genAssertTag :: Rator Lit -> Constant -> IRMonad PanicMap (Graph LNode O O)
+    genAssertTag (VarR var) tag = do
+      header <- freshVarName
+      extractedTag <- freshVarName
+       -- TODO: make the panic message more
+      panicLbl <- getPanicLabel "invalid type"
+      checkPassed <- freshLabel
+      return $ mkMiddles [
+        LoadWordLN (VarPlusSymL var CodePtrO) header,
+        BinOpLN BitAndLOp (VarR header) (LitR (WordC 3)) extractedTag,
+        CmpWordLN (VarR extractedTag) (LitR tag) ] <*>
+        mkLast (CJumpLN JE checkPassed panicLbl) |*><*|
+        mkFirst (LabelLN checkPassed)
+
+    genAssertTag (LitR (BoolL _)) BoolTagC = return emptyGraph
+    genAssertTag (LitR (IntL _)) IntTagC = return emptyGraph
+    genAssertTag (LitR (ClsrL _)) ClsrBaseTagC = return emptyGraph
+    genAssertTag _ _ = do
+      -- FIXME: this should fail at compile time
+      panicLbl <- getPanicLabel "invalid type"
+      unreachable <- freshLabel
+      return $ mkLast (JumpLN panicLbl) |*><*| mkFirst (LabelLN unreachable)
+
+    getPanicLabel error_str = do
+      lblMap <- irGetCustom
+      case error_str `M.lookup` lblMap of
+        Just (lbl, _) -> return lbl
+        Nothing -> do
+          panicLbl <- freshLabel
+          let panicBlock = mkFirst (LabelLN panicLbl) <*>
+                           mkLast (PanicLN error_str)
+          irPutCustom $ M.insert error_str (panicLbl, panicBlock) lblMap
+          return panicLbl
 
     ratorIntToConstant (VarR v) = VarR v
     ratorIntToConstant (LitR w) = LitR (WordC w)
@@ -198,15 +316,37 @@ hirToLIR oldLimit hGraph = do
     ratorBoolToConstant (VarR v) = VarR v
     ratorBoolToConstant (LitR b) = LitR (if b then BoolTrueC else BoolFalseC)
 
-    ratorLitToConstant (VarR v) = VarR v
-    ratorLitToConstant (LitR lit) = LitR $ WordC $ litToWord lit
+    ratorLitToConstant :: Rator Lit -> IRMonad PanicMap (Graph LNode O O,
+                                                         Rator Constant)
+    ratorLitToConstant (VarR v) = return (emptyGraph, VarR v)
+    ratorLitToConstant (LitR (ClsrL clsr)) = do
+      clsrVar <- freshVarName
+      clsrCode <- genCreateClosure clsr clsrVar
+      return (clsrCode, VarR clsrVar)
+    ratorLitToConstant (LitR lit) =
+      return (emptyGraph, LitR $ WordC $ litToWord lit)
 
     litToWord (BoolL b) = ((if b then 1 else 0) `B.shift` 2) `B.setBit` 1
     litToWord (IntL i) = i `B.shift` 2
-    litToWord (ClsrL _) = error "logic error"
+    litToWord (ClsrL op) =
+      error $ "logic error: litToWord called incorrectly with ClsrL " ++ show op
 
     hOpToLOp PlusOp = AddLOp
     hOpToLOp MinusOp = SubLOp
     hOpToLOp MultOp = MultLOp
     hOpToLOp DivOp = DivLOp
-    hOpToLOp _ = error "logic error"
+    hOpToLOp op =
+      error $ "logic error: hOpToLOp called incorrectly with " ++ show op
+
+
+lirDebugShowGraph :: M [LFunction] -> String
+lirDebugShowGraph fn =
+  let functionList = runSimpleUniqueMonad $ runWithFuel maxBound fn
+  in unlines $ map showLFunction functionList
+  where
+    showLFunction :: LFunction -> String
+    showLFunction (LFunction name argC entry body) =
+      let functionGraph = showGraph ((++ " ") . show) body
+      in unlines ["ClsrId = " ++ show name, "ArgCount = " ++ show argC,
+                  "EntryLabel = " ++ show entry, "Body = {",
+                  functionGraph ++ "}"]

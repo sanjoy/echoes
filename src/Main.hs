@@ -9,6 +9,7 @@ import System.Environment
 import Source.Parse
 import HIR.HIR
 import HIR.Optimizations
+import LIR.LIR
 
 usage :: IO ()
 usage = do
@@ -27,8 +28,20 @@ main = do
         Left errorStr -> putStrLn $ "error: " ++ errorStr
         Right term -> case termToHIR term of
           Nothing -> putStrLn "error: term not closed!"
-          Just hir ->
-            putStrLn $ hirDebugShowGraph (hir >>= optimizeHIR)
+          Just hir -> do
+            putStrLn "Unoptimized HIR"
+            putStrLn "~~~~~~~~~~~~~~~"
+            putStrLn $ hirDebugShowGraph hir
+            putStrLn ""
+            putStrLn "Optimized HIR"
+            putStrLn "~~~~~~~~~~~~~"
+            let optimizedHIR = hir >>= optimizeHIR
+            putStrLn $ hirDebugShowGraph optimizedHIR
+            putStrLn ""
+            putStrLn "Unoptimized LIR"
+            putStrLn "~~~~~~~~~~~~~~~"
+            let lir = optimizedHIR >>= mapM hirToLIR
+            putStrLn $ lirDebugShowGraph lir
   where getInputSource [] = Just (getContents, "(stdin)")
         getInputSource [fileN] = Just (readFile fileN, fileN)
         getInputSource _ = Nothing
