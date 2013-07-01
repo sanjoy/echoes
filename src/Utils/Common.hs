@@ -1,9 +1,9 @@
 {-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans -i.. #-}
 {-# LANGUAGE GADTs, RankNTypes, ScopedTypeVariables, ImpredicativeTypes #-}
 
-module Utils.Common(M, ClsrId, SSAVar, Rator, GenRator(..), ratorSubstitute,
-                    IRMonad, freshVarName, runIRMonad, irGetCustom,
-                    irPutCustom) where
+module Utils.Common(M, ClsrId, SSAVar, Rator, GenRator(..), mapGenRator,
+                    ratorSubstitute, IRMonad, freshVarName, runIRMonad,
+                    irGetCustom, irPutCustom) where
 
 import Compiler.Hoopl
 import Control.Monad.State
@@ -14,6 +14,10 @@ type ClsrId = Int
 type SSAVar = Int
 data GenRator varTy litTy = LitR litTy | VarR varTy deriving(Show, Eq, Ord)
 type Rator = GenRator SSAVar
+
+mapGenRator :: (r -> s) -> GenRator r a -> GenRator s a
+mapGenRator _ (LitR litTy) = LitR litTy
+mapGenRator f (VarR varTy) = VarR $ f varTy
 
 ratorSubstitute :: (SSAVar -> Maybe a) -> Rator a -> Rator a
 ratorSubstitute _ v@(LitR _) = v

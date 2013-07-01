@@ -2,9 +2,9 @@
 {-# LANGUAGE GADTs, RankNTypes, StandaloneDeriving, TypeSynonymInstances,
     FlexibleInstances #-}
 
-module LIR.LIR(hirToLIR, Offset(..), RuntimeFn(..), StructId(..),
+module LIR.LIR(hirToLIR, Offset(..), RuntimeFn(..), StructId(..), LSymAddress,
                JCondition(..), Constant(..), LBinOp(..), LNode, GenLNode(..),
-               LFunction(..), PanicMap, lirDebugShowGraph)
+               LFunction(..), PanicMap, mapGenLNodeRegs, lirDebugShowGraph)
        where
 
 import Compiler.Hoopl
@@ -55,6 +55,7 @@ import Utils.Graph
 -- "Symbolic" addresses.  We haven't lowered these into concrete
 -- calculations yet.
 data LSymAddress = ArgsPtrLSA Int
+                 | StackOffset Int
                  | VarPlusSymL SSAVar Offset
                  | VarPlusVarL SSAVar SSAVar
                  deriving(Show, Eq, Ord)
@@ -99,6 +100,27 @@ data GenLNode r e x where
 
 type LNode = GenLNode SSAVar
 deriving instance Show(LNode e x)
+
+mapGenLNodeRegs :: (r -> s) -> GenLNode r e x -> GenLNode s e x
+mapGenLNodeRegs _ (LabelLN lbl) = LabelLN lbl
+mapGenLNodeRegs f (CopyWordLN g r) = CopyWordLN (mapGenRator f g) (f r)
+mapGenLNodeRegs f (LoadWordLN addr r) = LoadWordLN addr (f r)
+mapGenLNodeRegs f (StoreWordLN addr g) = StoreWordLN addr (mapGenRator f g)
+mapGenLNodeRegs f (CmpWordLN g1 g2) =
+  CmpWordLN (mapGenRator f g1) (mapGenRator f g2)
+mapGenLNodeRegs f (CondMove cc g1 g2 r) =
+  CondMove cc (mapGenRator f g1) (mapGenRator f g2) (f r)
+mapGenLNodeRegs f (BinOpLN op g1 g2 r) =
+  BinOpLN op (mapGenRator f g1) (mapGenRator f g2) (f r)
+mapGenLNodeRegs f (Phi2LN (g1, l1) (g2, l2) r) =
+  Phi2LN (mapGenRator f g1, l1) (mapGenRator f g2, l2) (f r)
+mapGenLNodeRegs f (CallLN g1 args) =
+  CallLN (mapGenRator f g1) (map (mapGenRator f) args)
+mapGenLNodeRegs f (CallRuntimeLN fn r) = CallRuntimeLN fn (f r)
+mapGenLNodeRegs _ (PanicLN s) = PanicLN s
+mapGenLNodeRegs _ (CJumpLN cc l1 l2) = CJumpLN cc l1 l2
+mapGenLNodeRegs _ (JumpLN l) = JumpLN l
+mapGenLNodeRegs f (ReturnLN g) = ReturnLN (mapGenRator f g)
 
 instance NonLocal (GenLNode r) where
   entryLabel (LabelLN label) = label
