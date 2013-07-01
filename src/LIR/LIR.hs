@@ -16,9 +16,6 @@ import HIR.HIR
 import Utils.Common
 import Utils.Graph
 
--- Tags
---
-
 --- Object layout
 
 --  Pointers to objects are always tagged, using the two least
