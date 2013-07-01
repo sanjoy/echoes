@@ -10,6 +10,7 @@ import Source.Parse
 import HIR.HIR
 import HIR.Optimizations
 import LIR.LIR
+import Codegen.Codegen
 
 usage :: IO ()
 usage = do
@@ -42,6 +43,10 @@ main = do
             putStrLn "~~~~~~~~~~~~~~~"
             let lir = optimizedHIR >>= mapM hirToLIR
             putStrLn $ lirDebugShowGraph lir
+            putStrLn ""
+            putStrLn "Generated Code"
+            putStrLn "~~~~~~~~~~~~~~"
+            putStrLn $ lirDebugCodegen lir
   where getInputSource [] = Just (getContents, "(stdin)")
         getInputSource [fileN] = Just (readFile fileN, fileN)
         getInputSource _ = Nothing
