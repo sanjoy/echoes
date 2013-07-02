@@ -1,10 +1,11 @@
 {-# OPTIONS_GHC -Wall -Werror -i.. #-}
 {-# LANGUAGE GADTs, RankNTypes, StandaloneDeriving, TypeSynonymInstances,
-    FlexibleInstances #-}
+    FlexibleInstances, DeriveFunctor #-}
 
-module LIR.LIR(hirToLIR, Offset(..), RuntimeFn(..), StructId(..), LSymAddress,
-               JCondition(..), Constant(..), LBinOp(..), LNode, GenLNode(..),
-               LFunction(..), PanicMap, mapGenLNodeRegs, lirDebugShowGraph)
+module LIR.LIR(hirToLIR, Offset(..), RuntimeFn(..), StructId(..),
+               SymAddress(..), JCondition(..), Constant(..), LBinOp(..), LNode,
+               GenLNode(..), LFunction(..), PanicMap, mapGenLNodeRegs,
+               lirDebugShowGraph)
        where
 
 import Compiler.Hoopl
@@ -51,11 +52,13 @@ import Utils.Graph
 
 -- "Symbolic" addresses.  We haven't lowered these into concrete
 -- calculations yet.
-data LSymAddress = ArgsPtrLSA Int
-                 | StackOffset Int
-                 | VarPlusSymL SSAVar Offset
-                 | VarPlusVarL SSAVar SSAVar
-                 deriving(Show, Eq, Ord)
+data SymAddress r = ArgsPtrLSA Int
+                   | StackOffset Int
+                   | VarPlusSymL r Offset
+                   | VarPlusVarL r r
+                   deriving(Show, Eq, Ord)
+
+deriving instance Functor(SymAddress)
 
 data Offset = AppsLeftO | NextPtrO | NodeValueO | CodePtrO
             deriving(Show, Eq, Ord)
@@ -77,8 +80,8 @@ data GenLNode r e x where
   LabelLN :: Label -> GenLNode r C O
 
   CopyWordLN :: GenRator r Constant -> r -> GenLNode r O O
-  LoadWordLN :: LSymAddress -> r -> GenLNode r O O
-  StoreWordLN :: LSymAddress -> GenRator r Constant -> GenLNode r O O
+  LoadWordLN :: SymAddress r -> r -> GenLNode r O O
+  StoreWordLN :: SymAddress r -> GenRator r Constant -> GenLNode r O O
   CmpWordLN :: GenRator r Constant -> GenRator r Constant -> GenLNode r O O
   CondMoveLN :: JCondition -> GenRator r Constant -> GenRator r Constant ->
                 r -> GenLNode r O O
@@ -101,8 +104,9 @@ deriving instance Show(LNode e x)
 mapGenLNodeRegs :: (r -> s) -> GenLNode r e x -> GenLNode s e x
 mapGenLNodeRegs _ (LabelLN lbl) = LabelLN lbl
 mapGenLNodeRegs f (CopyWordLN g r) = CopyWordLN (mapGenRator f g) (f r)
-mapGenLNodeRegs f (LoadWordLN addr r) = LoadWordLN addr (f r)
-mapGenLNodeRegs f (StoreWordLN addr g) = StoreWordLN addr (mapGenRator f g)
+mapGenLNodeRegs f (LoadWordLN addr r) = LoadWordLN (fmap f addr) (f r)
+mapGenLNodeRegs f (StoreWordLN addr g) =
+  StoreWordLN (fmap f addr) (mapGenRator f g)
 mapGenLNodeRegs f (CmpWordLN g1 g2) =
   CmpWordLN (mapGenRator f g1) (mapGenRator f g2)
 mapGenLNodeRegs f (CondMoveLN cc g1 g2 r) =
