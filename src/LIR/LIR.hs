@@ -83,8 +83,7 @@ data GenLNode r e x where
   LoadWordLN :: SymAddress r -> r -> GenLNode r O O
   StoreWordLN :: SymAddress r -> GenRator r Constant -> GenLNode r O O
   CmpWordLN :: GenRator r Constant -> GenRator r Constant -> GenLNode r O O
-  CondMoveLN :: JCondition -> GenRator r Constant -> GenRator r Constant ->
-                r -> GenLNode r O O
+  CondMoveLN :: JCondition -> GenRator r Constant -> r -> GenLNode r O O
   BinOpLN :: LBinOp -> GenRator r Constant -> GenRator r Constant -> r ->
              GenLNode r O O
   Phi2LN :: (GenRator r Constant, Label) -> (GenRator r Constant, Label) ->
@@ -109,8 +108,8 @@ mapGenLNodeRegs f (StoreWordLN addr g) =
   StoreWordLN (fmap f addr) (mapGenRator f g)
 mapGenLNodeRegs f (CmpWordLN g1 g2) =
   CmpWordLN (mapGenRator f g1) (mapGenRator f g2)
-mapGenLNodeRegs f (CondMoveLN cc g1 g2 r) =
-  CondMoveLN cc (mapGenRator f g1) (mapGenRator f g2) (f r)
+mapGenLNodeRegs f (CondMoveLN cc g r) =
+  CondMoveLN cc (mapGenRator f g) (f r)
 mapGenLNodeRegs f (BinOpLN op g1 g2 r) =
   BinOpLN op (mapGenRator f g1) (mapGenRator f g2) (f r)
 mapGenLNodeRegs f (Phi2LN (g1, l1) (g2, l2) r) =
@@ -266,7 +265,8 @@ hirToLIR hFn = do
 
     genCmp op inA inB out = return $ mkMiddles [
       CmpWordLN inA inB,
-      CondMoveLN (opToJC op) (LitR BoolTrueC) (LitR BoolFalseC) out ]
+      CopyWordLN (LitR BoolTrueC) out,
+      CondMoveLN (opToJC op) (LitR BoolTrueC) out ]
 
     opToJC LtOp = JL
     opToJC EqOp = JE
