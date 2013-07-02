@@ -52,11 +52,9 @@ import Utils.Graph
 
 -- "Symbolic" addresses.  We haven't lowered these into concrete
 -- calculations yet.
-data SymAddress r = ArgsPtrLSA Int
-                   | StackOffset Int
-                   | VarPlusSymL r Offset
-                   | VarPlusVarL r r
-                   deriving(Show, Eq, Ord)
+data SymAddress r = ArgsPtrLSA Int | StackOffset Int | VarPlusSymL r Offset
+                  | VarPlusVarL r r
+                  deriving(Show, Eq, Ord)
 
 deriving instance Functor(SymAddress)
 
@@ -67,10 +65,10 @@ data RuntimeFn = AllocStructFn StructId | ForceFn (Rator Constant)
                deriving(Show, Eq, Ord)
 data StructId = ClsrST ClsrId | ClsrAppNodeST deriving(Show, Eq, Ord)
 data JCondition = JE | JL | JG | JNE deriving(Show, Eq, Ord)
-data Constant = WordC Int | ClsrSizeC ClsrId | ClsrAppLimitC ClsrId
-              | ClsrCodePtrC ClsrId | ClsrBaseTagC | ClsrNodeTagC
-              | ClsrTagC | IntTagC | BoolTagC | BoolTrueC | BoolFalseC
-              | ClearTagBitsC deriving(Show, Eq, Ord)
+data Constant = WordC Int | ClsrAppLimitC ClsrId | ClsrCodePtrC ClsrId
+              | ClsrBaseTagC | ClsrNodeTagC | ClsrTagC | IntTagC | BoolTagC
+              | BoolTrueC | BoolFalseC | ClearTagBitsC
+              deriving(Show, Eq, Ord)
 
 data LBinOp = BitAndLOp | BitOrLOp | BitXorLOp | AddLOp | SubLOp | MultLOp
             | DivLOp | LShiftLOp | RShiftLOp

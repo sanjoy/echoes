@@ -34,7 +34,6 @@ lowerConstant = LitWordOp . constToString
 
 constToString :: Constant -> String
 constToString (WordC w) = show w
-constToString (ClsrSizeC clsrId) = "clsr_size_" ++ show clsrId
 constToString (ClsrAppLimitC clsrId) = "clsr_applimit_" ++ show clsrId
 constToString (ClsrCodePtrC clsrId) = "clsr_fn_" ++ show clsrId
 constToString ClsrTagC = "0x1"
