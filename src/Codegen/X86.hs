@@ -5,6 +5,7 @@ module Codegen.X86(Reg, regStackPtr, regBasePtr, generalRegSet,
                    MachineInst, lirNodeToMachineInst,
                    machinePrologue, machineEpilogue) where
 
+import qualified Data.Bits as B
 import qualified Data.Set as S
 import qualified Numeric as N
 
@@ -28,25 +29,47 @@ generalRegSet = S.fromList [
   Reg_RAX, Reg_RBX, Reg_RCX, Reg_RDX, Reg_RSI, Reg_RDI, Reg_R8, Reg_R9, Reg_R10,
   Reg_R11, Reg_R12, Reg_R13, Reg_R14, Reg_R15 ]
 
-lowerConstant' :: Constant -> Int
-lowerConstant' (WordC w) = w
-lowerConstant' _ = 0xdeadbeef
-
 lowerConstant :: Constant -> Op
-lowerConstant (WordC w) = LitWordOp w
-lowerConstant _ = LitWordOp 0xdeadbeef
+lowerConstant = LitWordOp . constToString
 
-lowerSymAddress :: LSymAddress -> Op
-lowerSymAddress _ = LitWordOp 0xdeadbeef
+constToString :: Constant -> String
+constToString (WordC w) = show w
+constToString (ClsrSizeC clsrId) = "clsr_size_" ++ show clsrId
+constToString (ClsrAppLimitC clsrId) = "clsr_applimit_" ++ show clsrId
+constToString (ClsrCodePtrC clsrId) = "clsr_fn_" ++ show clsrId
+constToString ClsrTagC = "0x1"
+constToString ClsrBaseTagC = "0x1"
+constToString ClsrNodeTagC = "0x3"
+constToString IntTagC = "0x0"
+constToString BoolTagC = "0x2"
+constToString BoolFalseC = "0x2"
+constToString BoolTrueC = "0x6"
+constToString ClearTagBitsC = N.showHex (B.complement 3 :: Int) ""
 
-data Op = MemOp1 Reg | MemOp2 Reg Int | LitWordOp Int
+lowerOffset :: Offset -> String
+lowerOffset AppsLeftO = "0x8"
+lowerOffset NextPtrO = "0x0"
+lowerOffset NodeValueO = "0x10"
+lowerOffset CodePtrO = "0x0"
+
+lowerSymAddress :: SymAddress Reg -> Op
+lowerSymAddress (ArgsPtrLSA offset) = LitWordOp $ show offset ++ "(rsi)"
+lowerSymAddress (StackOffset offset) = LitWordOp $ show offset ++ "(rbp)"
+lowerSymAddress (VarPlusSymL r offset) =
+  LitWordOp $ lowerOffset  offset ++ "(" ++ show r ++ ")"
+lowerSymAddress (VarPlusVarL r1 r2) = LitWordOp $ show r2 ++ "(" ++ show r1 ++ ")"
+
+data Op = MemOp1 Reg | MemOp2 Reg Int | LitWordOp String
         deriving(Eq, Ord)
 
 data C = E | G | L deriving(Eq, Ord)
 
+newtype Str = Str String deriving(Eq, Ord)
+instance Show Str where show (Str s) = s
+
 data MachineInst =
   LabelMI String
-  | MovMI_RR Reg Reg | MovMI_OR Op Reg | MovMI_RO Reg Op | MovMI_IO Int Op
+  | MovMI_RR Reg Reg | MovMI_OR Op Reg | MovMI_RO Reg Op | MovMI_IO Str Op
   | CmpMI_RR Reg Reg | CmpMI_OR Op Reg | CmpMI_RO Reg Op
   | CMovMI_RR C Reg Reg | CMovMI_OR C Op Reg | CMovMI_RO C Reg Op | CMovMI_IO C Int Op
   | Unimplemented String
@@ -64,7 +87,7 @@ lirNodeToMachineInst (LoadWordLN symAddr reg) = [
 lirNodeToMachineInst (StoreWordLN symAddr (VarR reg)) = [
   MovMI_RO reg (lowerSymAddress symAddr)]
 lirNodeToMachineInst (StoreWordLN symAddr (LitR cValue)) = [
-  MovMI_IO (lowerConstant' cValue) (lowerSymAddress symAddr)]
+  MovMI_IO (Str $ constToString cValue) (lowerSymAddress symAddr)]
 lirNodeToMachineInst (CmpWordLN (LitR _) (LitR _)) =
   error "unfolded constant!"
 lirNodeToMachineInst (CmpWordLN (LitR c) (VarR v)) = [
@@ -102,7 +125,7 @@ instance Show Reg where
 instance Show Op where
   show (MemOp1 reg) = "(" ++ show reg ++ ")"
   show (MemOp2 reg offset) = show offset ++ "(" ++ show reg ++ ")"
-  show (LitWordOp lit) = "$" ++ N.showHex lit ""
+  show (LitWordOp lit) = "$" ++ lit
 
 instance Show C where
   show E = "e"
@@ -111,7 +134,7 @@ instance Show C where
 
 showMInst :: MachineInst -> String
 showMInst mInst = case mInst of
-  LabelMI lbl -> show lbl ++ ":"
+  LabelMI lbl -> lbl ++ ":"
   MovMI_RR r1 r2 -> movq r1 r2
   MovMI_OR op r -> movq op r
   MovMI_RO r op -> movq r op
