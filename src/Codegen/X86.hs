@@ -25,26 +25,36 @@ regStackPtr = Reg_RSP
 regBasePtr :: Reg
 regBasePtr = Reg_RBP
 
+vmGlobalsReg :: Reg
+vmGlobalsReg = Reg_R15
+
+vmGCLoc :: Int
+vmGCLoc = 8
+
+vmGCLim :: Int
+vmGCLim = 16
+
 generalRegSet :: S.Set Reg
 generalRegSet = S.fromList [
   Reg_RAX, Reg_RBX, Reg_RCX, Reg_RDX, Reg_RSI, Reg_RDI, Reg_R8, Reg_R9, Reg_R10,
-  Reg_R11, Reg_R12, Reg_R13, Reg_R14, Reg_R15 ]
+  Reg_R11, Reg_R12, Reg_R13, Reg_R14 ]
 
-lowerConstant :: Constant -> Op
-lowerConstant = LitWordOp . constToString
+lowerConstant :: (ClsrId -> Int) -> Constant -> Op
+lowerConstant appLimits = LitWordOp . (constToString appLimits)
 
-constToString :: Constant -> String
-constToString (WordC w) = show w
-constToString (ClsrAppLimitC clsrId) = "clsr_applimit_" ++ show clsrId
-constToString (ClsrCodePtrC clsrId) = "clsr_fn_" ++ show clsrId
-constToString ClsrTagC = "0x1"
-constToString ClsrBaseTagC = "0x1"
-constToString ClsrNodeTagC = "0x3"
-constToString IntTagC = "0x0"
-constToString BoolTagC = "0x2"
-constToString BoolFalseC = "0x2"
-constToString BoolTrueC = "0x6"
-constToString ClearTagBitsC = N.showHex (B.complement 3 :: Int) ""
+constToString :: (ClsrId -> Int) -> Constant -> String
+constToString _ (WordC w) = show w
+constToString appLimits (ClsrAppLimitC clsrId) =
+  N.showHex (appLimits clsrId) ""
+constToString _ (ClsrCodePtrC clsrId) = "closure_body_" ++ show clsrId
+constToString _ ClsrTagC = "0x1"
+constToString _ ClsrBaseTagC = "0x1"
+constToString _ ClsrNodeTagC = "0x3"
+constToString _ IntTagC = "0x0"
+constToString _ BoolTagC = "0x2"
+constToString _ BoolFalseC = "0x2"
+constToString _ BoolTrueC = "0x6"
+constToString _ ClearTagBitsC = N.showHex (B.complement 3 :: Int) ""
 
 lowerOffset :: Offset -> String
 lowerOffset AppsLeftO = "0x8"
@@ -57,7 +67,8 @@ lowerSymAddress (ArgsPtrLSA offset) = LitWordOp $ show offset ++ "(rsi)"
 lowerSymAddress (StackOffset offset) = LitWordOp $ show offset ++ "(rbp)"
 lowerSymAddress (VarPlusSymL r offset) =
   LitWordOp $ lowerOffset  offset ++ "(" ++ show r ++ ")"
-lowerSymAddress (VarPlusVarL r1 r2) = LitWordOp $ show r2 ++ "(" ++ show r1 ++ ")"
+lowerSymAddress (VarPlusVarL r1 r2) =
+  LitWordOp $ show r2 ++ "(" ++ show r1 ++ ")"
 
 data Op = MemOp1 Reg | MemOp2 Reg Int | LitWordOp String
         deriving(Eq, Ord)
@@ -78,40 +89,57 @@ data MachineInst =
   | AndMI_RR Reg Reg | AndMI_OR Op Reg | OrMI_RR  Reg Reg | OrMI_OR  Op Reg
   | XorMI_RR Reg Reg | XorMI_OR Op Reg | LShMI_RR Reg Reg | LShMI_OR Op Reg
   | RShMI_RR Reg Reg | RShMI_OR Op Reg
+  | CallMI_I Str | CallMI_R Reg | RetMI
+  | PushMI_I Reg | PushMI_R Reg | PopMI_R Reg
   | Unimplemented String
   deriving(Eq, Ord)
 
 deriving instance Show(GenLNode Reg e x)
 
-lirNodeToMachineInst :: GenLNode Reg e x -> [MachineInst]
-lirNodeToMachineInst (LabelLN lbl) = [LabelMI $ show lbl]
-lirNodeToMachineInst (CopyWordLN (LitR cValue) reg) = [
-  MovMI_OR (lowerConstant cValue) reg]
-lirNodeToMachineInst (CopyWordLN (VarR srcR) destR) = [MovMI_RR srcR destR]
-lirNodeToMachineInst (LoadWordLN symAddr reg) = [
+lirNodeToMachineInst :: (ClsrId -> Int) -> RegInfo Reg -> GenLNode Reg e x ->
+                        [MachineInst]
+
+lirNodeToMachineInst _ _ (LabelLN lbl) = [LabelMI $ show lbl]
+
+lirNodeToMachineInst aL _ (CopyWordLN (LitR cValue) reg) = [
+  MovMI_OR (lowerConstant aL cValue) reg]
+
+lirNodeToMachineInst _ _ (CopyWordLN (VarR srcR) destR) = [MovMI_RR srcR destR]
+
+lirNodeToMachineInst _ _ (LoadWordLN symAddr reg) = [
   MovMI_OR (lowerSymAddress symAddr) reg]
-lirNodeToMachineInst (StoreWordLN symAddr (VarR reg)) = [
+
+lirNodeToMachineInst _ _ (StoreWordLN symAddr (VarR reg)) = [
   MovMI_RO reg (lowerSymAddress symAddr)]
-lirNodeToMachineInst (StoreWordLN symAddr (LitR cValue)) = [
-  MovMI_IO (Str $ constToString cValue) (lowerSymAddress symAddr)]
-lirNodeToMachineInst (CmpWordLN (LitR _) (LitR _)) =
+
+lirNodeToMachineInst aL _ (StoreWordLN symAddr (LitR cValue)) = [
+  MovMI_IO (Str $ constToString aL cValue) (lowerSymAddress symAddr)]
+
+lirNodeToMachineInst _ _ (CmpWordLN (LitR _) (LitR _)) =
   error "unfolded constant!"
-lirNodeToMachineInst (CmpWordLN (LitR c) (VarR v)) = [
-  CmpMI_OR (lowerConstant c) v]
-lirNodeToMachineInst (CmpWordLN (VarR v) (LitR c)) = [
-  CmpMI_RO v (lowerConstant c)]
-lirNodeToMachineInst (CmpWordLN (VarR vA) (VarR vB)) = [
+
+lirNodeToMachineInst aL _ (CmpWordLN (LitR c) (VarR v)) = [
+  CmpMI_OR (lowerConstant aL c) v]
+
+lirNodeToMachineInst aL _ (CmpWordLN (VarR v) (LitR c)) = [
+  CmpMI_RO v (lowerConstant aL c)]
+
+lirNodeToMachineInst _ _ (CmpWordLN (VarR vA) (VarR vB)) = [
   CmpMI_RR vA vB]
-lirNodeToMachineInst (CondMoveLN cc (VarR r1) r2) = [
+
+lirNodeToMachineInst _ _ (CondMoveLN cc (VarR r1) r2) = [
   CMovMI_RR (jCondToC cc) r1 r2]
-lirNodeToMachineInst (CondMoveLN cc (LitR c) r) = [
-  CMovMI_OR (jCondToC cc) (lowerConstant c) r]
-lirNodeToMachineInst (BinOpLN DivLOp _ _ _) = [
+
+lirNodeToMachineInst aL _ (CondMoveLN cc (LitR c) r) = [
+  CMovMI_OR (jCondToC cc) (lowerConstant aL c) r]
+
+lirNodeToMachineInst _ _ (BinOpLN DivLOp _ _ _) = [
   Unimplemented "i not know to divide!"]
-lirNodeToMachineInst (BinOpLN op a b r) =
-  lirNodeToMachineInst (CopyWordLN a r) ++
+
+lirNodeToMachineInst aL gcRegs (BinOpLN op a b r) =
+  lirNodeToMachineInst aL gcRegs (CopyWordLN a r) ++
   [case b of (VarR reg) -> injFor_RR op reg r
-             (LitR c) -> injFor_OR op (lowerConstant c) r]
+             (LitR c) -> injFor_OR op (lowerConstant aL c) r]
   where injFor_RR BitAndLOp = AndMI_RR
         injFor_RR BitOrLOp = OrMI_RR
         injFor_RR BitXorLOp = XorMI_RR
@@ -132,7 +160,35 @@ lirNodeToMachineInst (BinOpLN op a b r) =
         injFor_OR LShiftLOp = LShMI_OR
         injFor_OR RShiftLOp = RShMI_OR
 
-lirNodeToMachineInst others = [Unimplemented $ show others]
+lirNodeToMachineInst _ _ (Phi2LN _ _ _) = [
+  -- TODO: change this to an 'error' once we have a proper compilation
+  -- pipeline
+  Unimplemented "phi nodes should have been removed by now" ]
+
+lirNodeToMachineInst _ rI (CallRuntimeLN (AllocStructFn _) _) =
+  let (regA:_) = riFreeRegs rI in [
+    MovMI_OR (MemOp2 vmGlobalsReg vmGCLoc) regA,
+    CmpMI_OR (MemOp2 vmGlobalsReg vmGCLim) regA,
+    -- Check if we can do a bump ptr allocation.  If not, jump to a full routine
+
+    -- GCed allocation
+    --
+    -- define struct vm_global whose pointer will be in vmGlobalsReg
+    -- define offsets for heap limit and current allocation location.
+    -- call into a gc routine for general thing safe points?
+    Unimplemented "AllocStructFn"
+  ]
+
+lirNodeToMachineInst _ _ (CallRuntimeLN (ForceFn _) reg) = [
+  -- The check for a closure has already been emitted.  Emit a call to
+  -- a trampoline C function that does the heavy lifting; and returns
+  -- the result in rax.
+  Unimplemented "The actual call",
+  MovMI_RR reg Reg_RAX -- We should run a pass after this that removes
+                       -- unneeded movs.
+  ]
+
+lirNodeToMachineInst _ _ others = [Unimplemented $ show others]
 
 machinePrologue  :: Int -> [MachineInst]
 machinePrologue _ = [Unimplemented "prologue"]
@@ -213,6 +269,15 @@ showMInst mInst = case mInst of
   RShMI_OR op  r  -> shrq op r
   DivMI_O  op     -> divq op
 
+  CallMI_R r      -> callq r
+  CallMI_I i      -> callq i
+
+  PushMI_R r      -> pushq r
+  PushMI_I i      -> pushq i
+  PopMI_R  r      -> popq  r
+
+  RetMI           -> retq
+
   Unimplemented s -> "unimplemented: " ++ s
   where
     movq src dest = "movq " ++ show src ++ ", " ++ show dest
@@ -226,7 +291,11 @@ showMInst mInst = case mInst of
     xorq a b = "xorq " ++ show a ++ ", " ++ show b
     shlq a b = "shlq " ++ show a ++ ", " ++ show b
     shrq a b = "shrq " ++ show a ++ ", " ++ show b
-    divq a = "divq " ++ show a
+    divq a   = "divq " ++ show a
+    callq a  = "callq " ++ show a
+    retq     = "retq "
+    pushq a  = "pushq " ++ show a
+    popq a   = "popq " ++ show a
 
 instance Show MachineInst where
   show = showMInst
