@@ -9,6 +9,7 @@ import qualified Data.Bits as B
 import qualified Data.Set as S
 import qualified Numeric as N
 
+import Codegen.Common
 import LIR.LIR
 import Utils.Common
 
@@ -16,7 +17,7 @@ data Reg = Reg_RAX | Reg_RBX | Reg_RCX | Reg_RDX | Reg_RSI | Reg_RDI
          | Reg_RBP | Reg_RSP
          | Reg_R8 | Reg_R9 | Reg_R10 | Reg_R11 | Reg_R12 | Reg_R13
          | Reg_R14 | Reg_R15
-         deriving(Eq, Ord)
+         deriving(Eq, Ord, Enum)
 
 regStackPtr :: Reg
 regStackPtr = Reg_RSP

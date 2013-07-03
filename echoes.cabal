@@ -50,7 +50,7 @@ executable echoes
   -- other-modules:       
   
   -- Other library packages from which modules are imported.
-  build-depends:       base ==4.5.*, hoopl ==3.8.*, containers ==0.4.*, mtl ==2.1.*, parsec ==3.1.*
+  build-depends:       base ==4.5.*, hoopl ==3.8.*, containers ==0.4.*, mtl ==2.1.*, parsec ==3.1.*, bitset ==1.4.5
   
   -- Directories containing source files.
   hs-source-dirs:      src
