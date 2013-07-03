@@ -61,7 +61,7 @@ deriving instance Functor(SymAddress)
 data Offset = AppsLeftO | NextPtrO | NodeValueO | CodePtrO
             deriving(Show, Eq, Ord)
 
-data RuntimeFn = AllocStructFn StructId | ForceFn (Rator Constant)
+data RuntimeFn = AllocStructFn StructId | ForceFn SSAVar
                deriving(Show, Eq, Ord)
 data StructId = ClsrST ClsrId | ClsrAppNodeST deriving(Show, Eq, Ord)
 data JCondition = JE | JL | JG | JNE deriving(Show, Eq, Ord)
@@ -207,7 +207,7 @@ hirToLIR hFn = do
       allDone <- freshLabel
       let doForce =
             mkFirst (LabelLN forcingNeeded) <*>
-            mkMiddle (CallRuntimeLN (ForceFn (VarR tagCleared)) result) <*>
+            mkMiddle (CallRuntimeLN (ForceFn tagCleared) result) <*>
             mkLast (JumpLN allDone)
       let finalBlock = mkFirst (LabelLN allDone)
       return $ checkIfClosure |*><*| checkIfSaturated |*><*| doForce |*><*|
