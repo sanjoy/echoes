@@ -29,7 +29,7 @@ dummyRegalloc graph = graphMapBlocks mapBlocks graph
   where mapBlocks = blockMapNodes nodeMap
         nodeMap = RegInfNode ri . (mapGenLNodeRegs (\_ -> someReg))
         ri = freeReg `riAddFreeReg` (gcReg `riAddGCReg` riNewRegInfo)
-        [someReg, gcReg, freeReg] = S.toList generalRegSet
+        [someReg, gcReg, freeReg] = take 3 $ S.toList generalRegSet
 
 lirToMachineCode :: (ClsrId -> Int) -> LFunction SSAVar -> M [String]
 lirToMachineCode argCounts (LFunction _ _ entry graph) =
