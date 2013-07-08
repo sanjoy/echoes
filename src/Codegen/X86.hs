@@ -5,6 +5,7 @@ module Codegen.X86(Reg, regStackPtr, regBasePtr, generalRegSet,
                    MachineInst, lirNodeToMachineInst,
                    machinePrologue, machineEpilogue) where
 
+import qualified Compiler.Hoopl as Hoopl
 import qualified Data.Bits as B
 import qualified Data.Set as S
 import qualified Numeric as N
@@ -70,6 +71,10 @@ lowerSymAddress (VarPlusSymL r offset) =
 lowerSymAddress (VarPlusVarL r1 r2) =
   LitWordOp $ show r2 ++ "(" ++ show r1 ++ ")"
 
+structSize :: StructId -> String
+structSize (ClsrST _) = "0x10"
+structSize ClsrAppNodeST = "0x16"
+
 data Op = MemOp1 Reg | MemOp2 Reg Int | LitWordOp String
         deriving(Eq, Ord)
 
@@ -89,6 +94,7 @@ data MachineInst =
   | AndMI_RR Reg Reg | AndMI_OR Op Reg | OrMI_RR  Reg Reg | OrMI_OR  Op Reg
   | XorMI_RR Reg Reg | XorMI_OR Op Reg | LShMI_RR Reg Reg | LShMI_OR Op Reg
   | RShMI_RR Reg Reg | RShMI_OR Op Reg
+  | CJumpMI C String | JumpMI String
   | CallMI_I Str | CallMI_R Reg | RetMI
   | PushMI_I Reg | PushMI_R Reg | PopMI_R Reg
   | Unimplemented String
@@ -167,28 +173,48 @@ lirNodeToMachineInst _ _ (Phi2LN _ _ _) = return [
   -- pipeline
   Unimplemented "phi nodes should have been removed by now" ]
 
-lirNodeToMachineInst _ rI (CallRuntimeLN (AllocStructFn _) _) =
-  let (regA:_) = riFreeRegs rI in return [
-    MovMI_OR (MemOp2 vmGlobalsReg vmGCLoc) regA,
-    CmpMI_OR (MemOp2 vmGlobalsReg vmGCLim) regA,
-    -- Check if we can do a bump ptr allocation.  If not, jump to a full routine
+lirNodeToMachineInst _ rI (CallRuntimeLN (AllocStructFn structId) result) =
+  let (regA:_) = riFreeRegs rI in do
+    notEnoughSpace <- Hoopl.freshLabel
+    allocationDone <- Hoopl.freshLabel
+    return $
+      checkGCLimit regA notEnoughSpace ++ fastPath regA allocationDone ++
+      slowPath notEnoughSpace ++ [ LabelMI (show allocationDone) ]
+    where
+      checkGCLimit regA notEnoughSpace = [
+        MovMI_OR (MemOp2 vmGlobalsReg vmGCLoc) regA,
+        AddMI_OR (LitWordOp (structSize structId)) regA,
+        CmpMI_OR (MemOp2 vmGlobalsReg vmGCLim) regA,
+        CJumpMI L (show notEnoughSpace) ]
 
-    -- GCed allocation
-    --
-    -- define struct vm_global whose pointer will be in vmGlobalsReg
-    -- define offsets for heap limit and current allocation location.
-    -- call into a gc routine for general thing safe points?
-    Unimplemented "AllocStructFn"
-  ]
+      fastPath regA allocationDone = [
+        MovMI_OR (MemOp2 vmGlobalsReg vmGCLoc) result,
+        MovMI_RO regA (MemOp2 vmGlobalsReg vmGCLoc),
+        JumpMI (show allocationDone) ]
 
-lirNodeToMachineInst _ _ (CallRuntimeLN (ForceFn _) reg) = return [
-  -- The check for a closure has already been emitted.  Emit a call to
-  -- a trampoline C function that does the heavy lifting; and returns
-  -- the result in rax.
-  Unimplemented "The actual call",
-  MovMI_RR reg Reg_RAX -- We should run a pass after this that removes
-                       -- unneeded movs.
-  ]
+      slowPath notEnoughSpace =
+        [ LabelMI (show notEnoughSpace) ] ++ pushGCRegs ++
+        [ CallMI_I (Str $ "runtime_allocate_" ++
+                    case structId of (ClsrST _) -> "closure"
+                                     ClsrAppNodeST -> "app_node") ] ++
+        popGCRegs ++ [ MovMI_RR Reg_RAX result ]
+
+      pushGCRegs = map PushMI_R $ riGCRegs rI
+      popGCRegs = reverse $ map PopMI_R $ riGCRegs rI
+
+lirNodeToMachineInst _ rI (CallRuntimeLN (ForceFn value) result) =
+  return $ map PushMI_R regList ++ callRT ++ reverse (map PopMI_R regList)
+  where
+    regList = (if Reg_RSI `elem` (riFreeRegs rI)
+               then [] else [Reg_RSI]) ++ riGCRegs rI
+    callRT = [
+      MovMI_RR value Reg_RSI,
+      CallMI_I $ Str "runtime_force",
+      MovMI_RR Reg_RAX result ]
+
+lirNodeToMachineInst aL rI (ReturnLN result) =
+  (lirNodeToMachineInst aL rI (CopyWordLN result Reg_RAX)) `mApp`
+  return [ RetMI ]
 
 lirNodeToMachineInst _ _ others = return [Unimplemented $ show others]
 
@@ -278,6 +304,9 @@ showMInst mInst = case mInst of
   PushMI_I i      -> pushq i
   PopMI_R  r      -> popq  r
 
+  CJumpMI c lbl   -> j c lbl
+  JumpMI lbl      -> jmp lbl
+
   RetMI           -> retq
 
   Unimplemented s -> "unimplemented: " ++ s
@@ -298,6 +327,8 @@ showMInst mInst = case mInst of
     retq     = "retq "
     pushq a  = "pushq " ++ show a
     popq a   = "popq " ++ show a
+    j c lbl  = "j" ++ show c ++ " " ++ lbl
+    jmp lbl = "jmp " ++ lbl
 
 instance Show MachineInst where
   show = showMInst
