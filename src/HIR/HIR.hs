@@ -2,7 +2,7 @@
 {-# LANGUAGE GADTs, RankNTypes, StandaloneDeriving #-}
 
 module HIR.HIR(termToHIR, HNode(..), HFunction(..), InpId, ResId, Lit(..),
-               getVarsRead, getVarsWritten, hirDebugShowGraph) where
+               getHVarsRead, getHVarsWritten, hirDebugShowGraph) where
 
 import qualified Data.List as L
 import qualified Data.Map as M
@@ -131,11 +131,11 @@ instance NonLocal HNode where
   successors (JumpHN label) = [label]
   successors (ReturnHN _) = []
 
-getVarsRead :: forall e x. HNode e x -> [SSAVar]
-getVarsRead = fst . getVRW
+getHVarsRead :: forall e x. HNode e x -> [SSAVar]
+getHVarsRead = fst . getVRW
 
-getVarsWritten :: forall e x. HNode e x -> [SSAVar]
-getVarsWritten = snd . getVRW
+getHVarsWritten :: forall e x. HNode e x -> [SSAVar]
+getHVarsWritten = snd . getVRW
 
 getVRW :: forall e x. HNode e x -> ([SSAVar], [SSAVar])
 getVRW LabelHN{} = ([], [])

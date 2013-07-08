@@ -29,15 +29,15 @@ transferDAE = mkBTransfer3 closeOpen openOpen openClose
     closeOpen _ = id
 
     openOpen node f =
-      let rVars = getVarsRead node
-          wVars = getVarsWritten node
+      let rVars = getHVarsRead node
+          wVars = getHVarsWritten node
           clearDefinedVars = L.foldl (flip S.delete) f wVars
       in L.foldl (flip S.insert) clearDefinedVars rVars
 
     openClose :: HNode O C -> FactBase DAEFact -> DAEFact
     openClose node fBase =
-      let rVars = getVarsRead node
-          wVars = getVarsWritten node
+      let rVars = getHVarsRead node
+          wVars = getHVarsWritten node
           totalFacts = S.unions $ map getFact $ successors node
           clearDefinedVars = L.foldl (flip S.delete) totalFacts wVars
       in L.foldl (flip S.insert) clearDefinedVars rVars
@@ -49,7 +49,7 @@ eliminateDeadAssignments = mkBRewrite3 closeOpen openOpen openClose
     closeOpen _ _ = return Nothing
     openClose _ _ = return Nothing
 
-    openOpen node facts = if any (`S.member` facts) (getVarsWritten node)
+    openOpen node facts = if any (`S.member` facts) (getHVarsWritten node)
                           then return Nothing
                           else return $ Just emptyGraph
 
