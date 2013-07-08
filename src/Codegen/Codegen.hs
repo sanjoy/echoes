@@ -4,6 +4,7 @@
 module Codegen.Codegen(lirToMachineCode, lirDebugCodegen) where
 
 import Compiler.Hoopl
+import Control.Monad
 import qualified Data.Map as M
 import qualified Data.Maybe as Mby
 import qualified Data.Set as S
@@ -30,30 +31,34 @@ dummyRegalloc graph = graphMapBlocks mapBlocks graph
         ri = freeReg `riAddFreeReg` (gcReg `riAddGCReg` riNewRegInfo)
         [someReg, gcReg, freeReg] = S.toList generalRegSet
 
-lirToMachineCode :: (ClsrId -> Int) -> LFunction SSAVar -> [String]
+lirToMachineCode :: (ClsrId -> Int) -> LFunction SSAVar -> M [String]
 lirToMachineCode argCounts (LFunction _ _ entry graph) =
   let (GMany NothingO lMap NothingO) = dummyRegalloc graph
       blockList = postorder_dfs_from lMap entry
-  in concatMap showBlock blockList
+  in mConcatMap showBlock blockList
   where
-    showBlock :: Block (RegInfNode RgLNode) C C -> [String]
+    mConcatMap f list = liftM concat $ sequence $ map f list
+    showBlock :: Block (RegInfNode RgLNode) C C -> M [String]
     showBlock block =
-          let (JustC lbl :: MaybeC C ((RegInfNode RgLNode) C O),
-               inner,
-               JustC jmp :: MaybeC C ((RegInfNode RgLNode) O C))
-                = blockToNodeList block
-              loweredInsts =
-                rNodeToMI argCounts lbl ++
-                concatMap (rNodeToMI argCounts) inner ++
-                rNodeToMI argCounts jmp
-          in map show loweredInsts
+      let (JustC lbl :: MaybeC C ((RegInfNode RgLNode) C O),
+           inner,
+           JustC jmp :: MaybeC C ((RegInfNode RgLNode) O C))
+            = blockToNodeList block
+      in do
+        loweredInsts <- (rNodeToMI argCounts lbl) `mApp`
+                        (mConcatMap (rNodeToMI argCounts) inner) `mApp`
+                        (rNodeToMI argCounts jmp)
+        return $ map show loweredInsts
       where rNodeToMI aC (RegInfNode rI node) = lirNodeToMachineInst aC rI node
+            mApp = liftM2 (++)
 
 lirDebugCodegen :: M [LFunction SSAVar] -> String
-lirDebugCodegen fn =
-  let functionList = runSimpleUniqueMonad $ runWithFuel maxBound fn
-      fnInfoMap =
-        M.fromList $ map (\(LFunction n aC _ _) -> (n, aC)) functionList
-      fnToMCode = unlines . lirToMachineCode (Mby.fromJust .
-                                              flip M.lookup fnInfoMap)
-  in unlines $ map fnToMCode functionList
+lirDebugCodegen mFnList =
+  let machineCode = do
+        functionList <- mFnList
+        let functionInfoMap =
+              M.fromList $ map (\(LFunction n aC _ _) -> (n, aC)) functionList
+            functionInfo = Mby.fromJust . flip M.lookup functionInfoMap
+        mCode <- mapM (lirToMachineCode functionInfo) functionList
+        return $ unlines $ concat $ mCode
+  in runSimpleUniqueMonad $ runWithFuel maxBound machineCode

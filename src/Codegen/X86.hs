@@ -97,49 +97,51 @@ data MachineInst =
 deriving instance Show(GenLNode Reg e x)
 
 lirNodeToMachineInst :: (ClsrId -> Int) -> RegInfo Reg -> GenLNode Reg e x ->
-                        [MachineInst]
+                        M [MachineInst]
 
-lirNodeToMachineInst _ _ (LabelLN lbl) = [LabelMI $ show lbl]
+lirNodeToMachineInst _ _ (LabelLN lbl) = return [LabelMI $ show lbl]
 
-lirNodeToMachineInst aL _ (CopyWordLN (LitR cValue) reg) = [
+lirNodeToMachineInst aL _ (CopyWordLN (LitR cValue) reg) = return [
   MovMI_OR (lowerConstant aL cValue) reg]
 
-lirNodeToMachineInst _ _ (CopyWordLN (VarR srcR) destR) = [MovMI_RR srcR destR]
+lirNodeToMachineInst _ _ (CopyWordLN (VarR srcR) destR) =
+  return [MovMI_RR srcR destR]
 
-lirNodeToMachineInst _ _ (LoadWordLN symAddr reg) = [
+lirNodeToMachineInst _ _ (LoadWordLN symAddr reg) = return [
   MovMI_OR (lowerSymAddress symAddr) reg]
 
-lirNodeToMachineInst _ _ (StoreWordLN symAddr (VarR reg)) = [
+lirNodeToMachineInst _ _ (StoreWordLN symAddr (VarR reg)) = return [
   MovMI_RO reg (lowerSymAddress symAddr)]
 
-lirNodeToMachineInst aL _ (StoreWordLN symAddr (LitR cValue)) = [
+lirNodeToMachineInst aL _ (StoreWordLN symAddr (LitR cValue)) = return [
   MovMI_IO (Str $ constToString aL cValue) (lowerSymAddress symAddr)]
 
 lirNodeToMachineInst _ _ (CmpWordLN (LitR _) (LitR _)) =
   error "unfolded constant!"
 
-lirNodeToMachineInst aL _ (CmpWordLN (LitR c) (VarR v)) = [
+lirNodeToMachineInst aL _ (CmpWordLN (LitR c) (VarR v)) = return [
   CmpMI_OR (lowerConstant aL c) v]
 
-lirNodeToMachineInst aL _ (CmpWordLN (VarR v) (LitR c)) = [
+lirNodeToMachineInst aL _ (CmpWordLN (VarR v) (LitR c)) = return [
   CmpMI_RO v (lowerConstant aL c)]
 
-lirNodeToMachineInst _ _ (CmpWordLN (VarR vA) (VarR vB)) = [
+lirNodeToMachineInst _ _ (CmpWordLN (VarR vA) (VarR vB)) = return [
   CmpMI_RR vA vB]
 
-lirNodeToMachineInst _ _ (CondMoveLN cc (VarR r1) r2) = [
+lirNodeToMachineInst _ _ (CondMoveLN cc (VarR r1) r2) = return [
   CMovMI_RR (jCondToC cc) r1 r2]
 
-lirNodeToMachineInst aL _ (CondMoveLN cc (LitR c) r) = [
+lirNodeToMachineInst aL _ (CondMoveLN cc (LitR c) r) = return [
   CMovMI_OR (jCondToC cc) (lowerConstant aL c) r]
 
-lirNodeToMachineInst _ _ (BinOpLN DivLOp _ _ _) = [
+lirNodeToMachineInst _ _ (BinOpLN DivLOp _ _ _) = return [
   Unimplemented "i not know to divide!"]
 
-lirNodeToMachineInst aL gcRegs (BinOpLN op a b r) =
-  lirNodeToMachineInst aL gcRegs (CopyWordLN a r) ++
-  [case b of (VarR reg) -> injFor_RR op reg r
-             (LitR c) -> injFor_OR op (lowerConstant aL c) r]
+lirNodeToMachineInst aL gcRegs (BinOpLN op a b r) = do
+  copyCode <- lirNodeToMachineInst aL gcRegs (CopyWordLN a r)
+  return $ copyCode ++ [
+    case b of (VarR reg) -> injFor_RR op reg r
+              (LitR c) -> injFor_OR op (lowerConstant aL c) r]
   where injFor_RR BitAndLOp = AndMI_RR
         injFor_RR BitOrLOp = OrMI_RR
         injFor_RR BitXorLOp = XorMI_RR
@@ -160,13 +162,13 @@ lirNodeToMachineInst aL gcRegs (BinOpLN op a b r) =
         injFor_OR LShiftLOp = LShMI_OR
         injFor_OR RShiftLOp = RShMI_OR
 
-lirNodeToMachineInst _ _ (Phi2LN _ _ _) = [
+lirNodeToMachineInst _ _ (Phi2LN _ _ _) = return [
   -- TODO: change this to an 'error' once we have a proper compilation
   -- pipeline
   Unimplemented "phi nodes should have been removed by now" ]
 
 lirNodeToMachineInst _ rI (CallRuntimeLN (AllocStructFn _) _) =
-  let (regA:_) = riFreeRegs rI in [
+  let (regA:_) = riFreeRegs rI in return [
     MovMI_OR (MemOp2 vmGlobalsReg vmGCLoc) regA,
     CmpMI_OR (MemOp2 vmGlobalsReg vmGCLim) regA,
     -- Check if we can do a bump ptr allocation.  If not, jump to a full routine
@@ -179,7 +181,7 @@ lirNodeToMachineInst _ rI (CallRuntimeLN (AllocStructFn _) _) =
     Unimplemented "AllocStructFn"
   ]
 
-lirNodeToMachineInst _ _ (CallRuntimeLN (ForceFn _) reg) = [
+lirNodeToMachineInst _ _ (CallRuntimeLN (ForceFn _) reg) = return [
   -- The check for a closure has already been emitted.  Emit a call to
   -- a trampoline C function that does the heavy lifting; and returns
   -- the result in rax.
@@ -188,7 +190,7 @@ lirNodeToMachineInst _ _ (CallRuntimeLN (ForceFn _) reg) = [
                        -- unneeded movs.
   ]
 
-lirNodeToMachineInst _ _ others = [Unimplemented $ show others]
+lirNodeToMachineInst _ _ others = return [Unimplemented $ show others]
 
 machinePrologue  :: Int -> [MachineInst]
 machinePrologue _ = [Unimplemented "prologue"]
