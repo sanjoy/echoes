@@ -61,8 +61,8 @@ deriving instance Functor(SymAddress)
 data Offset = AppsLeftO | NextPtrO | NodeValueO | CodePtrO
             deriving(Show, Eq, Ord)
 
-data RuntimeFn = AllocStructFn StructId | ForceFn SSAVar
-               deriving(Show, Eq, Ord)
+data RuntimeFn reg = AllocStructFn StructId | ForceFn reg
+                   deriving(Show, Eq, Ord)
 data StructId = ClsrST ClsrId | ClsrAppNodeST deriving(Show, Eq, Ord)
 data JCondition = JE | JL | JG | JNE deriving(Show, Eq, Ord)
 data Constant = WordC Int | ClsrAppLimitC ClsrId | ClsrCodePtrC ClsrId
@@ -86,7 +86,7 @@ data GenLNode r e x where
              GenLNode r O O
   Phi2LN :: (GenRator r Constant, Label) -> (GenRator r Constant, Label) ->
             r -> GenLNode r O O
-  CallRuntimeLN :: RuntimeFn -> r -> GenLNode r O O
+  CallRuntimeLN :: RuntimeFn r -> r -> GenLNode r O O
 
   PanicLN :: String -> GenLNode r O C
   CJumpLN :: JCondition -> Label {- True -} -> Label {- Fallthrough -} ->
@@ -111,11 +111,15 @@ mapGenLNodeRegs f (BinOpLN op g1 g2 r) =
   BinOpLN op (mapGenRator f g1) (mapGenRator f g2) (f r)
 mapGenLNodeRegs f (Phi2LN (g1, l1) (g2, l2) r) =
   Phi2LN (mapGenRator f g1, l1) (mapGenRator f g2, l2) (f r)
-mapGenLNodeRegs f (CallRuntimeLN fn r) = CallRuntimeLN fn (f r)
+mapGenLNodeRegs f (CallRuntimeLN fn r) = CallRuntimeLN (mapRTRegs f fn) (f r)
 mapGenLNodeRegs _ (PanicLN s) = PanicLN s
 mapGenLNodeRegs _ (CJumpLN cc l1 l2) = CJumpLN cc l1 l2
 mapGenLNodeRegs _ (JumpLN l) = JumpLN l
 mapGenLNodeRegs f (ReturnLN g) = ReturnLN (mapGenRator f g)
+
+mapRTRegs :: (r -> s) -> RuntimeFn r -> RuntimeFn s
+mapRTRegs _ (AllocStructFn structId) = AllocStructFn structId
+mapRTRegs f (ForceFn reg) = ForceFn $ f reg
 
 instance NonLocal (GenLNode r) where
   entryLabel (LabelLN label) = label
