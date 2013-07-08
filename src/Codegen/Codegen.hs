@@ -58,6 +58,9 @@ lirDebugCodegen mFnList =
         let functionInfoMap =
               M.fromList $ map (\(LFunction n aC _ _) -> (n, aC)) functionList
             functionInfo = Mby.fromJust . flip M.lookup functionInfoMap
-        mCode <- mapM (lirToMachineCode functionInfo) functionList
+        mCode <- mapM (toMachineCode functionInfo) functionList
         return $ unlines $ concat $ mCode
   in runSimpleUniqueMonad $ runWithFuel maxBound machineCode
+  where toMachineCode fnInfo lFn = do
+          code <- lirToMachineCode fnInfo lFn
+          return $ ("closure_body_" ++ show (lFnName lFn) ++ ":"):code
