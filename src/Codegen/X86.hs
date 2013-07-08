@@ -212,11 +212,19 @@ lirNodeToMachineInst _ rI (CallRuntimeLN (ForceFn value) result) =
       CallMI_I $ Str "runtime_force",
       MovMI_RR Reg_RAX result ]
 
+lirNodeToMachineInst _ _ (PanicLN _) = return [
+  JumpMI "runtime_panic" ]
+
+lirNodeToMachineInst _ _ (CJumpLN c tL fL) = return [
+  CJumpMI (jCondToC c) (show tL),
+  JumpMI (show fL) ]
+
+lirNodeToMachineInst _ _ (JumpLN lbl) = return [
+  JumpMI (show lbl) ]
+
 lirNodeToMachineInst aL rI (ReturnLN result) =
   (lirNodeToMachineInst aL rI (CopyWordLN result Reg_RAX)) `mApp`
   return [ RetMI ]
-
-lirNodeToMachineInst _ _ others = return [Unimplemented $ show others]
 
 machinePrologue  :: Int -> [MachineInst]
 machinePrologue _ = [Unimplemented "prologue"]
