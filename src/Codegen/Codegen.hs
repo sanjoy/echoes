@@ -50,7 +50,6 @@ lirToMachineCode argCounts (LFunction _ _ entry graph) =
                         (rNodeToMI argCounts jmp)
         return $ map show loweredInsts
       where rNodeToMI aC (RegInfNode rI node) = lirNodeToMachineInst aC rI node
-            mApp = liftM2 (++)
 
 lirDebugCodegen :: M [LFunction SSAVar] -> String
 lirDebugCodegen mFnList =

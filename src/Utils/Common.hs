@@ -3,7 +3,7 @@
 
 module Utils.Common(M, ClsrId, SSAVar, Rator, GenRator(..), mapGenRator,
                     ratorSubstitute, IRMonad, freshVarName, runIRMonad,
-                    irGetCustom, irPutCustom) where
+                    irGetCustom, irPutCustom, mApp) where
 
 import Compiler.Hoopl
 import Control.Monad.State
@@ -40,3 +40,6 @@ irGetCustom = liftM snd get
 
 irPutCustom :: custom -> IRMonad custom ()
 irPutCustom s = get >>= (\(a, _) -> put (a, s))
+
+mApp :: (Monad m) => m [a] -> m [a] -> m [a]
+mApp = liftM2 (++)
