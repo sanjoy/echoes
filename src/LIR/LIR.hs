@@ -5,7 +5,7 @@
 module LIR.LIR(hirToLIR, Offset(..), RuntimeFn(..), StructId(..),
                SymAddress(..), JCondition(..), Constant(..), LBinOp(..), LNode,
                GenLNode(..), LFunction(..), PanicMap, mapGenLNodeRegs,
-               lirDebugShowGraph)
+               getLVarsWritten, getLVarsRead, lirDebugShowGraph)
        where
 
 import Compiler.Hoopl
@@ -120,6 +120,32 @@ mapGenLNodeRegs f (ReturnLN g) = ReturnLN (mapGenRator f g)
 mapRTRegs :: (r -> s) -> RuntimeFn r -> RuntimeFn s
 mapRTRegs _ (AllocStructFn structId) = AllocStructFn structId
 mapRTRegs f (ForceFn reg) = ForceFn $ f reg
+
+getLVarsRead :: forall r e x. GenLNode r e x -> [r]
+getLVarsRead = fst . getVRW
+
+getLVarsWritten :: forall r e x. GenLNode r e x -> [r]
+getLVarsWritten = snd . getVRW
+
+getVRW :: forall r e x. GenLNode r e x -> ([r], [r])
+getVRW node =  case node of
+  (CopyWordLN g r) -> (ratorToReg [g], [r])
+  (LoadWordLN sAddr r) -> (symAddrToReg sAddr, [r])
+  (StoreWordLN sAddr g) -> (symAddrToReg sAddr, ratorToReg [g])
+  (CmpWordLN g1 g2) -> (ratorToReg [g1, g2], [])
+  (CondMoveLN _ g r) -> (ratorToReg [g], [r])
+  (BinOpLN _ g1 g2 r) -> (ratorToReg [g1, g2], [r])
+  (Phi2LN (g1, _) (g2, _) r) -> (ratorToReg [g1, g2], [r])
+  (CallRuntimeLN (ForceFn reg) r) -> ([reg], [r])
+  (CallRuntimeLN (AllocStructFn _) r) -> ([], [r])
+  (ReturnLN g) -> (ratorToReg [g], [])
+  _ -> ([], [])
+  where ratorToReg = concatMap (\rator -> case rator of
+                                   (VarR reg) -> [reg]
+                                   _ -> [])
+        symAddrToReg (VarPlusVarL r1 r2) = [r1, r2]
+        symAddrToReg (VarPlusSymL r _) = [r]
+        symAddrToReg _ = []
 
 instance NonLocal (GenLNode r) where
   entryLabel (LabelLN label) = label

@@ -2,8 +2,8 @@
 {-# LANGUAGE GADTs, StandaloneDeriving, FlexibleInstances #-}
 
 module Codegen.X86(Reg, regStackPtr, regBasePtr, generalRegSet,
-                   MachineInst, lirNodeToMachineInst,
-                   machinePrologue, machineEpilogue) where
+                   MachineInst, lirNodeToMachineInst, machinePrologue)
+       where
 
 import qualified Compiler.Hoopl as Hoopl
 import qualified Data.Bits as B
@@ -40,8 +40,14 @@ generalRegSet = S.fromList [
   Reg_RAX, Reg_RBX, Reg_RCX, Reg_RDX, Reg_RSI, Reg_RDI, Reg_R8, Reg_R9, Reg_R10,
   Reg_R11, Reg_R12, Reg_R13, Reg_R14 ]
 
+getLiveCallerSavedRegs :: RegInfo Reg -> [Reg]
+getLiveCallerSavedRegs rI = riNonFreeRegsIn rI calleeSavedList
+  where calleeSavedList =
+          [ Reg_RAX, Reg_RCX, Reg_RDX, Reg_RSI, Reg_RSI, Reg_RDI,
+            Reg_R8, Reg_R9, Reg_R10, Reg_R11 ]
+
 lowerConstant :: (ClsrId -> Int) -> Constant -> Op
-lowerConstant appLimits = LitWordOp . (constToString appLimits)
+lowerConstant appLimits = LitWordOp . constToString appLimits
 
 constToString :: (ClsrId -> Int) -> Constant -> String
 constToString _ (WordC w) = show w
@@ -168,13 +174,13 @@ lirNodeToMachineInst aL gcRegs (BinOpLN op a b r) = do
         injFor_OR LShiftLOp = LShMI_OR
         injFor_OR RShiftLOp = RShMI_OR
 
-lirNodeToMachineInst _ _ (Phi2LN _ _ _) = return [
+lirNodeToMachineInst _ _ Phi2LN{} = return [
   -- TODO: change this to an 'error' once we have a proper compilation
   -- pipeline
   Unimplemented "phi nodes should have been removed by now" ]
 
 lirNodeToMachineInst _ rI (CallRuntimeLN (AllocStructFn structId) result) =
-  let (regA:_) = riFreeRegs rI in do
+  let (regA:_) = filter (/= result) $ riFreeRegs rI in do
     notEnoughSpace <- Hoopl.freshLabel
     allocationDone <- Hoopl.freshLabel
     return $
@@ -193,20 +199,22 @@ lirNodeToMachineInst _ rI (CallRuntimeLN (AllocStructFn structId) result) =
         JumpMI (show allocationDone) ]
 
       slowPath notEnoughSpace =
-        [ LabelMI (show notEnoughSpace) ] ++ pushGCRegs ++
+        [ LabelMI (show notEnoughSpace) ] ++ pushLiveRegs ++
         [ CallMI_I (Str $ "runtime_allocate_" ++
                     case structId of (ClsrST _) -> "closure"
                                      ClsrAppNodeST -> "app_node") ] ++
-        popGCRegs ++ [ MovMI_RR Reg_RAX result ]
+        popLiveRegs ++ [ MovMI_RR Reg_RAX result ]
 
-      pushGCRegs = map PushMI_R $ riGCRegs rI
-      popGCRegs = reverse $ map PopMI_R $ riGCRegs rI
+      pushLiveRegs = map PushMI_R liveRegs
+      popLiveRegs = reverse $ map PopMI_R liveRegs
+
+      liveRegs = getLiveCallerSavedRegs rI
 
 lirNodeToMachineInst _ rI (CallRuntimeLN (ForceFn value) result) =
-  return $ map PushMI_R regList ++ callRT ++ reverse (map PopMI_R regList)
+  return $ map PushMI_R liveRegs ++ callRT ++ reverse (map PopMI_R liveRegs)
   where
-    regList = (if Reg_RSI `elem` (riFreeRegs rI)
-               then [] else [Reg_RSI]) ++ riGCRegs rI
+    liveRegs = getLiveCallerSavedRegs rI
+
     callRT = [
       MovMI_RR value Reg_RSI,
       CallMI_I $ Str "runtime_force",
@@ -223,20 +231,22 @@ lirNodeToMachineInst _ _ (JumpLN lbl) = return [
   JumpMI (show lbl) ]
 
 lirNodeToMachineInst aL rI (ReturnLN result) =
-  (lirNodeToMachineInst aL rI (CopyWordLN result Reg_RAX)) `mApp`
-  return [ RetMI ]
+  lirNodeToMachineInst aL rI (CopyWordLN result Reg_RAX) `mApp`
+  return [ MovMI_RR regBasePtr regStackPtr,
+           PopMI_R regBasePtr,
+           RetMI ]
 
 machinePrologue  :: Int -> [MachineInst]
-machinePrologue _ = [Unimplemented "prologue"]
+machinePrologue stackSize = [
+  PushMI_R regBasePtr,
+  MovMI_RR regStackPtr regBasePtr,
+  SubMI_OR (LitWordOp $ N.showHex stackSize "") regStackPtr ]
 
 jCondToC :: JCondition -> C
 jCondToC JE = E
 jCondToC JG = G
 jCondToC JL = L
 jCondToC JNE = NE
-
-machineEpilogue :: Int -> [MachineInst]
-machineEpilogue _ = [Unimplemented "epilogue"]
 
 instance Show Reg where
   show Reg_RAX = "rax"
@@ -259,7 +269,7 @@ instance Show Reg where
 instance Show Op where
   show (MemOp1 reg) = "(" ++ show reg ++ ")"
   show (MemOp2 reg offset) = show offset ++ "(" ++ show reg ++ ")"
-  show (LitWordOp lit) = "$" ++ lit
+  show (LitWordOp lit) = '$':lit
 
 instance Show C where
   show E = "e"
