@@ -27,7 +27,7 @@ instance NonLocal (RegInfNode (GenLNode r)) where
 
 nullRegAlloc :: Graph LNode C C -> M (Graph (RegInfNode RgLNode) C C, Int)
 nullRegAlloc graph =
-  let (frameSize, varMaps) = foldGraphNodes accSSAVar graph (0, M.empty)
+  let (frameSize, varMaps) = foldGraphNodes accSSAVar graph (wordSize, M.empty)
   in liftM (, frameSize) $
      mapConcatGraph (spillCO, spillOO varMaps, spillOC varMaps) graph
   where
@@ -36,7 +36,7 @@ nullRegAlloc graph =
     accSSAVar node (maxIndex, slots) =
       let insVarIfNeeded (curIdx, varToIdx) v =
             if v `M.member` varToIdx then (curIdx, varToIdx)
-            else (curIdx + 1, M.insert v curIdx varToIdx)
+            else (curIdx + wordSize, M.insert v curIdx varToIdx)
       in foldl insVarIfNeeded (maxIndex, slots) (getLVarsWritten node)
 
     -- In this "null" register allocator, we simply spill *all* the

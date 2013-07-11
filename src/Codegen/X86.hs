@@ -2,7 +2,8 @@
 {-# LANGUAGE GADTs, StandaloneDeriving, FlexibleInstances #-}
 
 module Codegen.X86(Reg, regStackPtr, regBasePtr, regArgPtr, generalRegSet,
-                   MachineInst, lirNodeToMachineInst, machinePrologue)
+                   MachineInst, lirNodeToMachineInst, machinePrologue,
+                   wordSize)
        where
 
 import qualified Compiler.Hoopl as Hoopl
@@ -37,6 +38,9 @@ vmGCLoc = 8
 vmGCLim :: Int
 vmGCLim = 16
 
+wordSize :: Int
+wordSize = 8
+
 generalRegSet :: S.Set Reg
 generalRegSet = S.fromList [
   Reg_RAX, Reg_RBX, Reg_RCX, Reg_RDX, Reg_RSI, Reg_RDI, Reg_R8, Reg_R9, Reg_R10,
@@ -56,8 +60,8 @@ constToString _ (WordC w) = show w
 constToString appLimits (ClsrAppLimitC clsrId) = show (appLimits clsrId)
 constToString _ (ClsrCodePtrC clsrId) = "closure_body_" ++ show clsrId
 constToString _ ClsrTagC = "1"
-constToString _ ClsrBaseTagC = "1"
-constToString _ ClsrNodeTagC = "3"
+constToString _ ClsrBaseTagC = "3"
+constToString _ ClsrNodeTagC = "1"
 constToString _ IntTagC = "0"
 constToString _ BoolTagC = "2"
 constToString _ BoolFalseC = "2"
@@ -72,7 +76,7 @@ lowerOffset CodePtrO = 0
 
 lowerSymAddress :: SymAddress Reg -> Op
 lowerSymAddress (ArgsPtrSA offset) = MemOp2 regArgPtr offset
-lowerSymAddress (StackOffsetSA offset) = MemOp2 regBasePtr offset
+lowerSymAddress (StackOffsetSA offset) = MemOp2 regBasePtr (- offset)
 lowerSymAddress (VarPlusSymSA reg offset) = MemOp2 reg (lowerOffset offset)
 lowerSymAddress (VarPlusVarSA reg1 reg2) = MemOp3 reg1 reg2
 
