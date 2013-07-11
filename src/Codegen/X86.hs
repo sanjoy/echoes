@@ -196,7 +196,7 @@ lirNodeToMachineInst _ rI (CallRuntimeLN (AllocStructFn structId) result) =
         MovMI_OR (MemOp2 vmGlobalsReg vmGCLoc) regA,
         AddMI_OR (LitWordOp (structSize structId)) regA,
         CmpMI_OR (MemOp2 vmGlobalsReg vmGCLim) regA,
-        CJumpMI L (show notEnoughSpace) ]
+        CJumpMI G (show notEnoughSpace) ]
 
       fastPath regA allocationDone = [
         MovMI_OR (MemOp2 vmGlobalsReg vmGCLoc) result,
