@@ -103,7 +103,7 @@ instance Show LitStr where show (LitStr s) = s
 data MachineInst =
   LabelMI String
   | MovMI_RR Reg Reg | MovMI_OR Op Reg | MovMI_RO Reg Op | MovMI_IO Str Op
-  | CmpMI_RR Reg Reg | CmpMI_OR Op Reg | CmpMI_RO Reg Op
+  | CmpMI_RR Reg Reg | CmpMI_OR Op Reg
   | CMovMI_RR C Reg Reg | CMovMI_OR C Op Reg | CMovMI_RO C Reg Op
   | CMovMI_IO C Int Op
   | AddMI_RR Reg Reg | AddMI_OR Op Reg | SubMI_RR Reg Reg | SubMI_OR Op Reg
@@ -139,16 +139,10 @@ lirNodeToMachineInst _ _ (StoreWordLN symAddr (VarR reg)) = return [
 lirNodeToMachineInst aL _ (StoreWordLN symAddr (LitR cValue)) = return [
   MovMI_IO (Str $ constToString aL cValue) (lowerSymAddress symAddr)]
 
-lirNodeToMachineInst _ _ (CmpWordLN (LitR _) (LitR _)) =
-  error "unfolded constant!"
-
-lirNodeToMachineInst aL _ (CmpWordLN (LitR c) (VarR v)) = return [
+lirNodeToMachineInst aL _ (CmpWordLN (LitR c) v) = return [
   CmpMI_OR (lowerConstant aL c) v]
 
-lirNodeToMachineInst aL _ (CmpWordLN (VarR v) (LitR c)) = return [
-  CmpMI_RO v (lowerConstant aL c)]
-
-lirNodeToMachineInst _ _ (CmpWordLN (VarR vA) (VarR vB)) = return [
+lirNodeToMachineInst _ _ (CmpWordLN (VarR vA) vB) = return [
   CmpMI_RR vA vB]
 
 lirNodeToMachineInst _ _ (CondMoveLN cc (VarR r1) r2) = return [
@@ -300,7 +294,6 @@ showMInst mInst = case mInst of
 
   CmpMI_RR r1 r2 -> cmpq r1 r2
   CmpMI_OR op r -> cmpq op r
-  CmpMI_RO r op -> cmpq r op
 
   CMovMI_RR c r1 r2 -> cmov c r1 r2
   CMovMI_OR c op r -> cmov c op r

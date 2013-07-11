@@ -80,7 +80,7 @@ data GenLNode r e x where
   CopyWordLN :: GenRator r Constant -> r -> GenLNode r O O
   LoadWordLN :: SymAddress r -> r -> GenLNode r O O
   StoreWordLN :: SymAddress r -> GenRator r Constant -> GenLNode r O O
-  CmpWordLN :: GenRator r Constant -> GenRator r Constant -> GenLNode r O O
+  CmpWordLN :: GenRator r Constant -> r -> GenLNode r O O
   CondMoveLN :: JCondition -> GenRator r Constant -> r -> GenLNode r O O
   BinOpLN :: LBinOp -> GenRator r Constant -> GenRator r Constant -> r ->
              GenLNode r O O
@@ -103,8 +103,7 @@ mapGenLNodeRegs f (CopyWordLN g r) = CopyWordLN (mapGenRator f g) (f r)
 mapGenLNodeRegs f (LoadWordLN addr r) = LoadWordLN (fmap f addr) (f r)
 mapGenLNodeRegs f (StoreWordLN addr g) =
   StoreWordLN (fmap f addr) (mapGenRator f g)
-mapGenLNodeRegs f (CmpWordLN g1 g2) =
-  CmpWordLN (mapGenRator f g1) (mapGenRator f g2)
+mapGenLNodeRegs f (CmpWordLN g1 g2) = CmpWordLN (mapGenRator f g1) (f g2)
 mapGenLNodeRegs f (CondMoveLN cc g r) =
   CondMoveLN cc (mapGenRator f g) (f r)
 mapGenLNodeRegs f (BinOpLN op g1 g2 r) =
@@ -132,7 +131,7 @@ getVRW node =  case node of
   (CopyWordLN g r) -> (ratorToReg [g], [r])
   (LoadWordLN sAddr r) -> (symAddrToReg sAddr, [r])
   (StoreWordLN sAddr g) -> (symAddrToReg sAddr, ratorToReg [g])
-  (CmpWordLN g1 g2) -> (ratorToReg [g1, g2], [])
+  (CmpWordLN g r) -> (r:ratorToReg [g], [])
   (CondMoveLN _ g r) -> (ratorToReg [g], [r])
   (BinOpLN _ g1 g2 r) -> (ratorToReg [g1, g2], [r])
   (Phi2LN (g1, _) (g2, _) r) -> (ratorToReg [g1, g2], [r])
@@ -191,7 +190,7 @@ hirToLIR hFn = do
         assertLeft <- genAssertTagI inA
         assertRight <- genAssertTagI inB
         actualOp <- case op of
-          DivOp -> genDivison inA' inB' out
+          DivOp -> genDivision inA' inB' out
           MultOp -> genMultiplication inA' inB' out
           LtOp -> genCmp LtOp inA' inB' out
           EqOp -> genCmp EqOp inA' inB' out
@@ -222,7 +221,7 @@ hirToLIR hFn = do
       isClosure <- freshLabel
       let checkIfClosure = mkMiddles [
             BinOpLN BitAndLOp (VarR value) (LitR ClsrTagC) tag,
-            CmpWordLN (VarR tag) (LitR ClsrTagC) ] <*>
+            CmpWordLN (LitR ClsrTagC) tag ] <*>
                            mkLast (CJumpLN JNE notNeeded isClosure)
       appsLeft <- freshVarName
       tagCleared <- freshVarName
@@ -232,7 +231,7 @@ hirToLIR hFn = do
             mkMiddles [
               BinOpLN BitAndLOp (LitR ClearTagBitsC) (VarR value) tagCleared,
               LoadWordLN (VarPlusSymSA tagCleared AppsLeftO) appsLeft,
-              CmpWordLN (VarR appsLeft) (LitR (WordC 0)) ] <*>
+              CmpWordLN (LitR (WordC 0)) appsLeft ] <*>
             mkLast (CJumpLN JNE notNeeded forcingNeeded)
       allDone <- freshLabel
       let doForce =
@@ -251,8 +250,11 @@ hirToLIR hFn = do
       (valCode, valConst) <- ratorLitToConstant value
       return $ valCode <*> mkMiddle (CopyWordLN valConst result)
 
-    nodeMapFn (IfThenElseHN condition tLbl fLbl) =
-      let cmp = CmpWordLN (ratorBoolToConstant condition) (LitR BoolTrueC)
+    nodeMapFn (IfThenElseHN (LitR condition) tLbl fLbl) =
+      return $ mkLast $ JumpLN $ if condition then tLbl else fLbl
+
+    nodeMapFn (IfThenElseHN (VarR condition) tLbl fLbl) =
+      let cmp = CmpWordLN (LitR BoolTrueC) condition
           jmp = CJumpLN JE tLbl fLbl
       in return $ mkMiddle cmp <*> mkLast jmp
 
@@ -284,16 +286,27 @@ hirToLIR hFn = do
       return (mkMiddles [
                  BinOpLN BitAndLOp (LitR ClearTagBitsC) var untaggedVar,
                  LoadWordLN (VarPlusSymSA untaggedVar AppsLeftO) appsLeft,
-                 CmpWordLN (VarR appsLeft) (LitR (WordC 0)) ] <*>
+                 CmpWordLN (LitR (WordC 0)) appsLeft ] <*>
               mkLast (CJumpLN JE panicLbl pushOkay) |*><*|
               mkFirst (LabelLN pushOkay), appsLeft)
 
-    genCmp op inA inB out = return $ mkMiddles [
-      CmpWordLN inA inB,
-      CopyWordLN (LitR BoolTrueC) out,
+    genCmp op (LitR inA) (LitR inB) out = do
+      tmpB <- freshVarName
+      compareOp <- genCmp op (LitR inA) (VarR tmpB) out
+      return $
+        mkMiddle (CopyWordLN (LitR inB) tmpB) <*> compareOp
+
+    genCmp op (VarR inA) (LitR inB) out = return $ mkMiddles [
+      CmpWordLN (LitR inB) inA,
+      CopyWordLN (LitR BoolFalseC) out,
       CondMoveLN (opToJC op) (LitR BoolTrueC) out ]
 
-    opToJC LtOp = JL
+    genCmp op inA (VarR inB) out = return $ mkMiddles [
+      CmpWordLN inA inB,
+      CopyWordLN (LitR BoolTrueC) out,
+      CondMoveLN (opToJC op) (LitR BoolFalseC) out ]
+
+    opToJC LtOp = JG
     opToJC EqOp = JE
     opToJC op =
       error $ "logic error: opToJC called incorrectly with " ++ show op
@@ -304,15 +317,28 @@ hirToLIR hFn = do
         BinOpLN RShiftLOp inA (LitR (WordC 2)) aRShifted,
         BinOpLN MultLOp inB (VarR aRShifted) result ]
 
-    genDivison inA inB result = do
-      leftIsZero <- getPanicLabel "division by zero!"
-      leftIsNotZero <- freshLabel
+    genDivision :: Rator Constant -> Rator Constant -> SSAVar ->
+                   IRMonad PanicMap (Graph LNode O O)
+    genDivision _ (LitR (WordC 0)) _ = do
+      divisorIsZero <- getPanicLabel "division by zero!"
+      neverReached <- freshLabel
+      return $ mkLast (JumpLN divisorIsZero) |*><*|
+        mkFirst (LabelLN neverReached)
+
+    genDivision inA (LitR inB) result = do
+      tmpB <- freshVarName
+      divOp <- genDivision inA (VarR tmpB) result
+      return $ mkMiddle (CopyWordLN (LitR inB) tmpB) <*> divOp
+
+    genDivision inA (VarR inB) result = do
+      divisorIsZero <- getPanicLabel "division by zero!"
+      divisorIsNotZero <- freshLabel
       resultUnshifted <- freshVarName
-      let zeroCheck = mkMiddle (CmpWordLN inB (LitR (WordC 0))) <*>
-                      mkLast (CJumpLN JE leftIsZero leftIsNotZero)
+      let zeroCheck = mkMiddle (CmpWordLN (LitR (WordC 0)) inB) <*>
+                      mkLast (CJumpLN JE divisorIsZero divisorIsNotZero)
       return $ zeroCheck |*><*|
-        mkFirst (LabelLN leftIsNotZero) <*>
-        mkMiddles [ BinOpLN DivLOp inA inB resultUnshifted,
+        mkFirst (LabelLN divisorIsNotZero) <*>
+        mkMiddles [ BinOpLN DivLOp inA (VarR inB) resultUnshifted,
                     BinOpLN RShiftLOp (VarR resultUnshifted) (LitR (WordC 2))
                     result ]
 
@@ -338,7 +364,7 @@ hirToLIR hFn = do
       return $ mkMiddles [
         LoadWordLN (VarPlusSymSA var CodePtrO) header,
         BinOpLN BitAndLOp (VarR header) (LitR (WordC 3)) extractedTag,
-        CmpWordLN (VarR extractedTag) (LitR tag) ] <*>
+        CmpWordLN (LitR tag) extractedTag ] <*>
         mkLast (CJumpLN JE checkPassed panicLbl) |*><*|
         mkFirst (LabelLN checkPassed)
 
@@ -364,9 +390,6 @@ hirToLIR hFn = do
 
     ratorIntToConstant (VarR v) = VarR v
     ratorIntToConstant (LitR w) = LitR (WordC w)
-
-    ratorBoolToConstant (VarR v) = VarR v
-    ratorBoolToConstant (LitR b) = LitR (if b then BoolTrueC else BoolFalseC)
 
     litToConstant :: Lit -> IRMonad PanicMap (Graph LNode O O, Rator Constant)
     litToConstant (ClsrL clsr) = do
