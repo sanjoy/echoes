@@ -52,8 +52,8 @@ import Utils.Graph
 
 -- "Symbolic" addresses.  We haven't lowered these into concrete
 -- calculations yet.
-data SymAddress r = ArgsPtrLSA Int | StackOffset Int | VarPlusSymL r Offset
-                  | VarPlusVarL r r
+data SymAddress r = ArgsPtrSA Int | StackOffsetSA Int | VarPlusSymSA r Offset
+                  | VarPlusVarSA r r
                   deriving(Show, Eq, Ord)
 
 deriving instance Functor(SymAddress)
@@ -143,8 +143,8 @@ getVRW node =  case node of
   where ratorToReg = concatMap (\rator -> case rator of
                                    (VarR reg) -> [reg]
                                    _ -> [])
-        symAddrToReg (VarPlusVarL r1 r2) = [r1, r2]
-        symAddrToReg (VarPlusSymL r _) = [r]
+        symAddrToReg (VarPlusVarSA r1 r2) = [r1, r2]
+        symAddrToReg (VarPlusSymSA r _) = [r]
         symAddrToReg _ = []
 
 instance NonLocal (GenLNode r) where
@@ -175,7 +175,7 @@ hirToLIR hFn = do
     nodeMapFn (LabelHN lbl) = return $ mkFirst $ LabelLN lbl
 
     nodeMapFn (LoadArgHN hInp out) =
-      return $ mkMiddle $ LoadWordLN (ArgsPtrLSA hInp) out
+      return $ mkMiddle $ LoadWordLN (ArgsPtrSA hInp) out
 
     nodeMapFn (LoadLitHN (ClsrL clsrId) out) = genCreateClosure clsrId out
 
@@ -231,7 +231,7 @@ hirToLIR hFn = do
             mkFirst (LabelLN isClosure) <*>
             mkMiddles [
               BinOpLN BitAndLOp (LitR ClearTagBitsC) (VarR value) tagCleared,
-              LoadWordLN (VarPlusSymL tagCleared AppsLeftO) appsLeft,
+              LoadWordLN (VarPlusSymSA tagCleared AppsLeftO) appsLeft,
               CmpWordLN (VarR appsLeft) (LitR (WordC 0)) ] <*>
             mkLast (CJumpLN JNE notNeeded forcingNeeded)
       allDone <- freshLabel
@@ -271,9 +271,9 @@ hirToLIR hFn = do
         mkMiddles [
           BinOpLN SubLOp (VarR appsLeft) (LitR (WordC 1)) appsLeft',
           CallRuntimeLN (AllocStructFn ClsrAppNodeST) freshNode,
-          StoreWordLN (VarPlusSymL freshNode AppsLeftO) (VarR appsLeft'),
-          StoreWordLN (VarPlusSymL freshNode NextPtrO) (VarR clsrVar),
-          StoreWordLN (VarPlusSymL freshNode NodeValueO) value,
+          StoreWordLN (VarPlusSymSA freshNode AppsLeftO) (VarR appsLeft'),
+          StoreWordLN (VarPlusSymSA freshNode NextPtrO) (VarR clsrVar),
+          StoreWordLN (VarPlusSymSA freshNode NodeValueO) value,
           BinOpLN BitOrLOp (LitR ClsrNodeTagC) (VarR freshNode) newNode ]
 
     checkPushValid var = do
@@ -283,7 +283,7 @@ hirToLIR hFn = do
       untaggedVar <- freshVarName
       return (mkMiddles [
                  BinOpLN BitAndLOp (LitR ClearTagBitsC) var untaggedVar,
-                 LoadWordLN (VarPlusSymL untaggedVar AppsLeftO) appsLeft,
+                 LoadWordLN (VarPlusSymSA untaggedVar AppsLeftO) appsLeft,
                  CmpWordLN (VarR appsLeft) (LitR (WordC 0)) ] <*>
               mkLast (CJumpLN JE panicLbl pushOkay) |*><*|
               mkFirst (LabelLN pushOkay), appsLeft)
@@ -324,8 +324,8 @@ hirToLIR hFn = do
       untaggedClsr <- freshVarName
       return $ mkMiddles [
         CallRuntimeLN (AllocStructFn (ClsrST clsrId)) untaggedClsr,
-        StoreWordLN (VarPlusSymL untaggedClsr AppsLeftO) (LitR (ClsrAppLimitC clsrId)),
-        StoreWordLN (VarPlusSymL untaggedClsr CodePtrO) (LitR (ClsrCodePtrC clsrId)),
+        StoreWordLN (VarPlusSymSA untaggedClsr AppsLeftO) (LitR (ClsrAppLimitC clsrId)),
+        StoreWordLN (VarPlusSymSA untaggedClsr CodePtrO) (LitR (ClsrCodePtrC clsrId)),
         BinOpLN BitOrLOp (LitR ClsrBaseTagC) (VarR untaggedClsr) result ]
 
     genAssertTag :: Rator Lit -> Constant -> IRMonad PanicMap (Graph LNode O O)
@@ -336,7 +336,7 @@ hirToLIR hFn = do
       panicLbl <- getPanicLabel "invalid type"
       checkPassed <- freshLabel
       return $ mkMiddles [
-        LoadWordLN (VarPlusSymL var CodePtrO) header,
+        LoadWordLN (VarPlusSymSA var CodePtrO) header,
         BinOpLN BitAndLOp (VarR header) (LitR (WordC 3)) extractedTag,
         CmpWordLN (VarR extractedTag) (LitR tag) ] <*>
         mkLast (CJumpLN JE checkPassed panicLbl) |*><*|

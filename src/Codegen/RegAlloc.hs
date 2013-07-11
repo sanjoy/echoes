@@ -72,7 +72,7 @@ nullRegAlloc graph =
                 offset = ssaVar `directLookup` slots
             in (reg `riRemoveFreeReg` freeRegsTillNow,
                 RegInfNode freeRegsTillNow (
-                  StoreWordLN (StackOffset offset) (VarR reg)):stores)
+                  StoreWordLN (StackOffsetSA offset) (VarR reg)):stores)
 
           newNode =
             RegInfNode freeRegsAfterLoads $ mapGenLNodeRegs
@@ -104,7 +104,7 @@ nullRegAlloc graph =
           offset = ssaVar `directLookup` slots
       in (reg `riRemoveFreeReg` freeRegsTillNow,
           RegInfNode freeRegsTillNow (
-            LoadWordLN (StackOffset offset) reg):loads)
+            LoadWordLN (StackOffsetSA offset) reg):loads)
 
     allRegsFree = riAddFreeReg' generalRegSet riNewRegInfo
     directLookup k m = Mby.fromMaybe crash (M.lookup k m)

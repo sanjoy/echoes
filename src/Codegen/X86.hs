@@ -71,10 +71,10 @@ lowerOffset NodeValueO = 16
 lowerOffset CodePtrO = 0
 
 lowerSymAddress :: SymAddress Reg -> Op
-lowerSymAddress (ArgsPtrLSA offset) = MemOp2 regArgPtr offset
-lowerSymAddress (StackOffset offset) = MemOp2 regBasePtr offset
-lowerSymAddress (VarPlusSymL reg offset) = MemOp2 reg (lowerOffset offset)
-lowerSymAddress (VarPlusVarL reg1 reg2) = MemOp3 reg1 reg2
+lowerSymAddress (ArgsPtrSA offset) = MemOp2 regArgPtr offset
+lowerSymAddress (StackOffsetSA offset) = MemOp2 regBasePtr offset
+lowerSymAddress (VarPlusSymSA reg offset) = MemOp2 reg (lowerOffset offset)
+lowerSymAddress (VarPlusVarSA reg1 reg2) = MemOp3 reg1 reg2
 
 structSize :: StructId -> String
 structSize (ClsrST _) = "16"
