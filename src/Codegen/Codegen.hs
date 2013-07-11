@@ -39,7 +39,8 @@ lirCodegen :: [LFunction SSAVar] -> M String
 lirCodegen fnList =
   let fnInfoMap = M.fromList $ map (\(LFunction n aC _ _) -> (n, aC)) fnList
       fnInfo = Mby.fromJust . flip M.lookup fnInfoMap
-  in liftM (unlines . concat) $ mapM (toMachineCode fnInfo) fnList
+  in liftM ((asmHeader ++). unlines . concat) $
+     mapM (toMachineCode fnInfo) fnList
   where toMachineCode fnInfo lFn = do
           code <- lirToMachineCode fnInfo lFn
           return $ ("closure_body_" ++ show (lFnName lFn) ++ ":"):code ++ [""]

@@ -3,7 +3,7 @@
 
 module Codegen.X86(Reg, regStackPtr, regBasePtr, regArgPtr, generalRegSet,
                    MachineInst, lirNodeToMachineInst, machinePrologue,
-                   wordSize)
+                   wordSize, asmHeader)
        where
 
 import qualified Compiler.Hoopl as Hoopl
@@ -37,6 +37,12 @@ vmGCLoc = 8
 
 vmGCLim :: Int
 vmGCLim = 16
+
+asmHeader :: String
+asmHeader = unlines [
+  "\t.globl\tclosure_body_0",
+  "\t.type\tclosure_body_0,\t@function",
+  ""]
 
 wordSize :: Int
 wordSize = 8
