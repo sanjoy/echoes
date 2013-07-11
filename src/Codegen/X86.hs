@@ -1,14 +1,13 @@
 {-# OPTIONS_GHC -Wall -Werror -i.. #-}
 {-# LANGUAGE GADTs, StandaloneDeriving, FlexibleInstances #-}
 
-module Codegen.X86(Reg, regStackPtr, regBasePtr, generalRegSet,
+module Codegen.X86(Reg, regStackPtr, regBasePtr, regArgPtr, generalRegSet,
                    MachineInst, lirNodeToMachineInst, machinePrologue)
        where
 
 import qualified Compiler.Hoopl as Hoopl
 import qualified Data.Bits as B
 import qualified Data.Set as S
-import qualified Numeric as N
 
 import Codegen.Common
 import LIR.LIR
@@ -25,6 +24,9 @@ regStackPtr = Reg_RSP
 
 regBasePtr :: Reg
 regBasePtr = Reg_RBP
+
+regArgPtr :: Reg
+regArgPtr = Reg_RSI
 
 vmGlobalsReg :: Reg
 vmGlobalsReg = Reg_R15
@@ -51,43 +53,42 @@ lowerConstant appLimits = LitWordOp . constToString appLimits
 
 constToString :: (ClsrId -> Int) -> Constant -> String
 constToString _ (WordC w) = show w
-constToString appLimits (ClsrAppLimitC clsrId) =
-  N.showHex (appLimits clsrId) ""
+constToString appLimits (ClsrAppLimitC clsrId) = show (appLimits clsrId)
 constToString _ (ClsrCodePtrC clsrId) = "closure_body_" ++ show clsrId
-constToString _ ClsrTagC = "0x1"
-constToString _ ClsrBaseTagC = "0x1"
-constToString _ ClsrNodeTagC = "0x3"
-constToString _ IntTagC = "0x0"
-constToString _ BoolTagC = "0x2"
-constToString _ BoolFalseC = "0x2"
-constToString _ BoolTrueC = "0x6"
-constToString _ ClearTagBitsC = N.showHex (B.complement 3 :: Int) ""
+constToString _ ClsrTagC = "1"
+constToString _ ClsrBaseTagC = "1"
+constToString _ ClsrNodeTagC = "3"
+constToString _ IntTagC = "0"
+constToString _ BoolTagC = "2"
+constToString _ BoolFalseC = "2"
+constToString _ BoolTrueC = "6"
+constToString _ ClearTagBitsC = show (B.complement 3 :: Int)
 
-lowerOffset :: Offset -> String
-lowerOffset AppsLeftO = "0x8"
-lowerOffset NextPtrO = "0x0"
-lowerOffset NodeValueO = "0x10"
-lowerOffset CodePtrO = "0x0"
+lowerOffset :: Offset -> Int
+lowerOffset AppsLeftO = 8
+lowerOffset NextPtrO = 0
+lowerOffset NodeValueO = 16
+lowerOffset CodePtrO = 0
 
 lowerSymAddress :: SymAddress Reg -> Op
-lowerSymAddress (ArgsPtrLSA offset) = LitWordOp $ show offset ++ "(rsi)"
-lowerSymAddress (StackOffset offset) = LitWordOp $ show offset ++ "(rbp)"
-lowerSymAddress (VarPlusSymL r offset) =
-  LitWordOp $ lowerOffset  offset ++ "(" ++ show r ++ ")"
-lowerSymAddress (VarPlusVarL r1 r2) =
-  LitWordOp $ show r2 ++ "(" ++ show r1 ++ ")"
+lowerSymAddress (ArgsPtrLSA offset) = MemOp2 regArgPtr offset
+lowerSymAddress (StackOffset offset) = MemOp2 regBasePtr offset
+lowerSymAddress (VarPlusSymL reg offset) = MemOp2 reg (lowerOffset offset)
+lowerSymAddress (VarPlusVarL reg1 reg2) = MemOp3 reg1 reg2
 
 structSize :: StructId -> String
-structSize (ClsrST _) = "0x10"
-structSize ClsrAppNodeST = "0x16"
+structSize (ClsrST _) = "16"
+structSize ClsrAppNodeST = "24"
 
-data Op = MemOp1 Reg | MemOp2 Reg Int | LitWordOp String
+data Op = MemOp1 Reg | MemOp2 Reg Int | MemOp3 Reg Reg | LitWordOp String
         deriving(Eq, Ord)
 
 data C = E | G | L | NE deriving(Eq, Ord)
 
 newtype Str = Str String deriving(Eq, Ord)
-instance Show Str where show (Str s) = s
+instance Show Str where show (Str s) = '$':s
+newtype LitStr = LitStr String deriving(Eq, Ord)
+instance Show LitStr where show (LitStr s) = s
 
 data MachineInst =
   LabelMI String
@@ -101,7 +102,7 @@ data MachineInst =
   | XorMI_RR Reg Reg | XorMI_OR Op Reg | LShMI_RR Reg Reg | LShMI_OR Op Reg
   | RShMI_RR Reg Reg | RShMI_OR Op Reg
   | CJumpMI C String | JumpMI String
-  | CallMI_I Str | CallMI_R Reg | RetMI
+  | CallMI_I LitStr | CallMI_R Reg | RetMI
   | PushMI_I Reg | PushMI_R Reg | PopMI_R Reg
   | Unimplemented String
   deriving(Eq, Ord)
@@ -200,7 +201,7 @@ lirNodeToMachineInst _ rI (CallRuntimeLN (AllocStructFn structId) result) =
 
       slowPath notEnoughSpace =
         [ LabelMI (show notEnoughSpace) ] ++ pushLiveRegs ++
-        [ CallMI_I (Str $ "runtime_allocate_" ++
+        [ CallMI_I (LitStr $ "runtime_allocate_" ++
                     case structId of (ClsrST _) -> "closure"
                                      ClsrAppNodeST -> "app_node") ] ++
         popLiveRegs ++ [ MovMI_RR Reg_RAX result ]
@@ -217,7 +218,7 @@ lirNodeToMachineInst _ rI (CallRuntimeLN (ForceFn value) result) =
 
     callRT = [
       MovMI_RR value Reg_RSI,
-      CallMI_I $ Str "runtime_force",
+      CallMI_I $ LitStr "runtime_force",
       MovMI_RR Reg_RAX result ]
 
 lirNodeToMachineInst _ _ (PanicLN _) = return [
@@ -240,7 +241,7 @@ machinePrologue  :: Int -> [MachineInst]
 machinePrologue stackSize = [
   PushMI_R regBasePtr,
   MovMI_RR regStackPtr regBasePtr,
-  SubMI_OR (LitWordOp $ N.showHex stackSize "") regStackPtr ]
+  SubMI_OR (LitWordOp $ show stackSize) regStackPtr ]
 
 jCondToC :: JCondition -> C
 jCondToC JE = E
@@ -249,26 +250,27 @@ jCondToC JL = L
 jCondToC JNE = NE
 
 instance Show Reg where
-  show Reg_RAX = "rax"
-  show Reg_RBX = "rbx"
-  show Reg_RCX = "rcx"
-  show Reg_RDX = "rdx"
-  show Reg_RSI = "rsi"
-  show Reg_RDI = "rdi"
-  show Reg_RBP = "rbp"
-  show Reg_RSP = "rsp"
-  show Reg_R8  = "r8"
-  show Reg_R9  = "r9"
-  show Reg_R10 = "r10"
-  show Reg_R11 = "r11"
-  show Reg_R12 = "r12"
-  show Reg_R13 = "r13"
-  show Reg_R14 = "r14"
-  show Reg_R15 = "r15"
+  show Reg_RAX = "%rax"
+  show Reg_RBX = "%rbx"
+  show Reg_RCX = "%rcx"
+  show Reg_RDX = "%rdx"
+  show Reg_RSI = "%rsi"
+  show Reg_RDI = "%rdi"
+  show Reg_RBP = "%rbp"
+  show Reg_RSP = "%rsp"
+  show Reg_R8  = "%r8"
+  show Reg_R9  = "%r9"
+  show Reg_R10 = "%r10"
+  show Reg_R11 = "%r11"
+  show Reg_R12 = "%r12"
+  show Reg_R13 = "%r13"
+  show Reg_R14 = "%r14"
+  show Reg_R15 = "%r15"
 
 instance Show Op where
   show (MemOp1 reg) = "(" ++ show reg ++ ")"
   show (MemOp2 reg offset) = show offset ++ "(" ++ show reg ++ ")"
+  show (MemOp3 reg1 reg2) = show reg1 ++ "(" ++ show reg2 ++ ")"
   show (LitWordOp lit) = '$':lit
 
 instance Show C where
@@ -315,8 +317,8 @@ showMInst mInst = case mInst of
   RShMI_OR op  r  -> shrq op r
   DivMI_O  op     -> divq op
 
-  CallMI_R r      -> callq r
-  CallMI_I i      -> callq i
+  CallMI_R r      -> call r
+  CallMI_I i      -> call i
 
   PushMI_R r      -> pushq r
   PushMI_I i      -> pushq i
@@ -341,7 +343,7 @@ showMInst mInst = case mInst of
     shlq a b = "shlq " ++ show a ++ ", " ++ show b
     shrq a b = "shrq " ++ show a ++ ", " ++ show b
     divq a   = "divq " ++ show a
-    callq a  = "callq " ++ show a
+    call a   = "call " ++ show a
     retq     = "retq "
     pushq a  = "pushq " ++ show a
     popq a   = "popq " ++ show a
