@@ -1,7 +1,8 @@
 {-# OPTIONS_GHC -Wall -Werror -fno-warn-warnings-deprecations #-}
 {-# LANGUAGE GADTs, ScopedTypeVariables, FlexibleInstances #-}
 
-module Codegen.Codegen(lirToMachineCode, lirDebugCodegen) where
+module Codegen.Codegen(lirToMachineCode, lirDebugCodegen, lirCodegen)
+       where
 
 import Compiler.Hoopl
 import Control.Monad
@@ -34,16 +35,15 @@ lirToMachineCode argCounts (LFunction _ _ entry graph) = do
         return $ map show (machinePrologue stackSize ++ loweredInsts)
       where rNodeToMI aC (RegInfNode rI node) = lirNodeToMachineInst aC rI node
 
-lirDebugCodegen :: M [LFunction SSAVar] -> String
-lirDebugCodegen mFnList =
-  let machineCode = do
-        functionList <- mFnList
-        let functionInfoMap =
-              M.fromList $ map (\(LFunction n aC _ _) -> (n, aC)) functionList
-            functionInfo = Mby.fromJust . flip M.lookup functionInfoMap
-        mCode <- mapM (toMachineCode functionInfo) functionList
-        return $ unlines $ concat mCode
-  in runSimpleUniqueMonad $ runWithFuel maxBound machineCode
+lirCodegen :: [LFunction SSAVar] -> M String
+lirCodegen fnList =
+  let fnInfoMap = M.fromList $ map (\(LFunction n aC _ _) -> (n, aC)) fnList
+      fnInfo = Mby.fromJust . flip M.lookup fnInfoMap
+  in liftM (unlines . concat) $ mapM (toMachineCode fnInfo) fnList
   where toMachineCode fnInfo lFn = do
           code <- lirToMachineCode fnInfo lFn
-          return $ ("closure_body_" ++ show (lFnName lFn) ++ ":"):code
+          return $ ("closure_body_" ++ show (lFnName lFn) ++ ":"):code ++ [""]
+
+lirDebugCodegen :: M [LFunction SSAVar] -> String
+lirDebugCodegen mFnList =
+  runSimpleUniqueMonad $ runWithFuel maxBound (mFnList >>= lirCodegen)

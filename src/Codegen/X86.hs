@@ -349,4 +349,5 @@ showMInst mInst = case mInst of
     jmp lbl = "jmp " ++ lbl
 
 instance Show MachineInst where
-  show = showMInst
+  show lbl@(LabelMI _) = showMInst lbl
+  show other = '\t':showMInst other
