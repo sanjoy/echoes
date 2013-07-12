@@ -364,14 +364,12 @@ hirToLIR hFn = do
 
     genAssertTag :: Rator Lit -> Constant -> IRMonad PanicMap (Graph LNode O O)
     genAssertTag (VarR var) tag = do
-      header <- freshVarName
       extractedTag <- freshVarName
        -- TODO: make the panic message more
       panicLbl <- getPanicLabel "invalid type"
       checkPassed <- freshLabel
       return $ mkMiddles [
-        LoadWordLN (VarPlusSymSA var CodePtrO) header,
-        BinOpLN BitAndLOp (VarR header) (LitR (WordC 3)) extractedTag,
+        BinOpLN BitAndLOp (VarR var) (LitR (WordC 3)) extractedTag,
         CmpWordLN (LitR tag) extractedTag ] <*>
         mkLast (CJumpLN JE checkPassed panicLbl) |*><*|
         mkFirst (LabelLN checkPassed)
