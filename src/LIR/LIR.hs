@@ -127,7 +127,7 @@ getVRW :: forall r e x. GenLNode r e x -> ([r], [r])
 getVRW node =  case node of
   (CopyWordLN g r) -> (ratorToReg [g], [r])
   (LoadWordLN sAddr r) -> (symAddrToReg sAddr, [r])
-  (StoreWordLN sAddr g) -> (symAddrToReg sAddr, ratorToReg [g])
+  (StoreWordLN sAddr g) -> (ratorToReg [g] ++ symAddrToReg sAddr, [])
   (CmpWordLN g r) -> (r:ratorToReg [g], [])
   (BinOpLN _ g1 g2 r) -> (ratorToReg [g1, g2], [r])
   (Phi2LN (g1, _) (g2, _) r) -> (ratorToReg [g1, g2], [r])
