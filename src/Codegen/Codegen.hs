@@ -18,12 +18,13 @@ lirToMachineCode :: (ClsrId -> Int) -> LFunction SSAVar -> M [String]
 lirToMachineCode argCounts (LFunction _ _ entry graph) = do
   (GMany NothingO lMap NothingO, stackSize) <- nullRegAlloc graph
   let blockList = postorder_dfs_from lMap entry
-  eachBlock <- mapM (showBlock stackSize) blockList
-  return $ concat eachBlock
+  eachBlock <- mapM showBlock blockList
+  return $ prologue stackSize ++ concat eachBlock
   where
+    prologue stackSize = map show $ machinePrologue stackSize
     mConcatMap f list = liftM concat $ mapM f list
-    showBlock :: Int -> Block (RegInfNode RgLNode) C C -> M [String]
-    showBlock stackSize block =
+    showBlock :: Block (RegInfNode RgLNode) C C -> M [String]
+    showBlock block =
       let (JustC lbl :: MaybeC C ((RegInfNode RgLNode) C O),
            inner,
            JustC jmp :: MaybeC C ((RegInfNode RgLNode) O C))
@@ -32,7 +33,7 @@ lirToMachineCode argCounts (LFunction _ _ entry graph) = do
         loweredInsts <- rNodeToMI argCounts lbl `mApp`
                         mConcatMap (rNodeToMI argCounts) inner `mApp`
                         rNodeToMI argCounts jmp
-        return $ map show (machinePrologue stackSize ++ loweredInsts)
+        return $ map show loweredInsts
       where rNodeToMI aC (RegInfNode rI node) = lirNodeToMachineInst aC rI node
 
 lirCodegen :: [LFunction SSAVar] -> M String
