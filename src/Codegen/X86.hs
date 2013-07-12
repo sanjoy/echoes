@@ -101,7 +101,7 @@ newtype LitStr = LitStr String deriving(Eq, Ord)
 instance Show LitStr where show (LitStr s) = s
 
 data MachineInst =
-  LabelMI String
+  LabelMI String | CommentMI String
   | MovMI_RR Reg Reg | MovMI_OR Op Reg | MovMI_RO Reg Op | MovMI_IO Str Op
   | CmpMI_RR Reg Reg | CmpMI_OR Op Reg
   | AddMI_RR Reg Reg | AddMI_OR Op Reg | SubMI_RR Reg Reg | SubMI_OR Op Reg
@@ -117,37 +117,44 @@ data MachineInst =
 
 deriving instance Show(GenLNode Reg e x)
 
+-- TODO: make this optional
 lirNodeToMachineInst :: (ClsrId -> Int) -> RegInfo Reg -> GenLNode Reg e x ->
                         M [MachineInst]
+lirNodeToMachineInst clsrMap reg node = do
+  code <- lirNodeToMachineInst' clsrMap reg node
+  return ((CommentMI $ show node):code)
 
-lirNodeToMachineInst _ _ (LabelLN lbl) = return [LabelMI $ show lbl]
+lirNodeToMachineInst' :: (ClsrId -> Int) -> RegInfo Reg -> GenLNode Reg e x ->
+                         M [MachineInst]
 
-lirNodeToMachineInst aL _ (CopyWordLN (LitR cValue) reg) = return [
+lirNodeToMachineInst' _ _ (LabelLN lbl) = return [LabelMI $ show lbl]
+
+lirNodeToMachineInst' aL _ (CopyWordLN (LitR cValue) reg) = return [
   MovMI_OR (lowerConstant aL cValue) reg]
 
-lirNodeToMachineInst _ _ (CopyWordLN (VarR srcR) destR) =
+lirNodeToMachineInst' _ _ (CopyWordLN (VarR srcR) destR) =
   return [MovMI_RR srcR destR]
 
-lirNodeToMachineInst _ _ (LoadWordLN symAddr reg) = return [
+lirNodeToMachineInst' _ _ (LoadWordLN symAddr reg) = return [
   MovMI_OR (lowerSymAddress symAddr) reg]
 
-lirNodeToMachineInst _ _ (StoreWordLN symAddr (VarR reg)) = return [
+lirNodeToMachineInst' _ _ (StoreWordLN symAddr (VarR reg)) = return [
   MovMI_RO reg (lowerSymAddress symAddr)]
 
-lirNodeToMachineInst aL _ (StoreWordLN symAddr (LitR cValue)) = return [
+lirNodeToMachineInst' aL _ (StoreWordLN symAddr (LitR cValue)) = return [
   MovMI_IO (Str $ constToString aL cValue) (lowerSymAddress symAddr)]
 
-lirNodeToMachineInst aL _ (CmpWordLN (LitR c) v) = return [
+lirNodeToMachineInst' aL _ (CmpWordLN (LitR c) v) = return [
   CmpMI_OR (lowerConstant aL c) v]
 
-lirNodeToMachineInst _ _ (CmpWordLN (VarR vA) vB) = return [
+lirNodeToMachineInst' _ _ (CmpWordLN (VarR vA) vB) = return [
   CmpMI_RR vA vB]
 
-lirNodeToMachineInst _ _ (BinOpLN DivLOp _ _ _) = return [
+lirNodeToMachineInst' _ _ (BinOpLN DivLOp _ _ _) = return [
   Unimplemented "i not know to divide!"]
 
-lirNodeToMachineInst aL gcRegs (BinOpLN op a b r) = do
-  copyCode <- lirNodeToMachineInst aL gcRegs (CopyWordLN a r)
+lirNodeToMachineInst' aL gcRegs (BinOpLN op a b r) = do
+  copyCode <- lirNodeToMachineInst' aL gcRegs (CopyWordLN a r)
   return $ copyCode ++ [
     case b of (VarR reg) -> injFor_RR op reg r
               (LitR c) -> injFor_OR op (lowerConstant aL c) r]
@@ -171,12 +178,12 @@ lirNodeToMachineInst aL gcRegs (BinOpLN op a b r) = do
         injFor_OR LShiftLOp = LShMI_OR
         injFor_OR RShiftLOp = RShMI_OR
 
-lirNodeToMachineInst _ _ Phi2LN{} = return [
+lirNodeToMachineInst' _ _ Phi2LN{} = return [
   -- TODO: change this to an 'error' once we have a proper compilation
   -- pipeline
   Unimplemented "phi nodes should have been removed by now" ]
 
-lirNodeToMachineInst _ rI (CallRuntimeLN (AllocStructFn structId) result) =
+lirNodeToMachineInst' _ rI (CallRuntimeLN (AllocStructFn structId) result) =
   let (regA:_) = filter (/= result) $ riFreeRegs rI in do
     notEnoughSpace <- Hoopl.freshLabel
     allocationDone <- Hoopl.freshLabel
@@ -207,7 +214,7 @@ lirNodeToMachineInst _ rI (CallRuntimeLN (AllocStructFn structId) result) =
 
       liveRegs = getLiveCallerSavedRegs rI
 
-lirNodeToMachineInst _ rI (CallRuntimeLN (ForceFn value) result) =
+lirNodeToMachineInst' _ rI (CallRuntimeLN (ForceFn value) result) =
   return $ map PushMI_R liveRegs ++ callRT ++ reverse (map PopMI_R liveRegs)
   where
     liveRegs = getLiveCallerSavedRegs rI
@@ -217,18 +224,19 @@ lirNodeToMachineInst _ rI (CallRuntimeLN (ForceFn value) result) =
       CallMI_I $ LitStr "runtime_force",
       MovMI_RR Reg_RAX result ]
 
-lirNodeToMachineInst _ _ (PanicLN _) = return [
+lirNodeToMachineInst' _ _ (PanicLN str) = return [
+  CommentMI str,
   JumpMI "runtime_panic" ]
 
-lirNodeToMachineInst _ _ (CJumpLN c tL fL) = return [
+lirNodeToMachineInst' _ _ (CJumpLN c tL fL) = return [
   CJumpMI (jCondToC c) (show tL),
   JumpMI (show fL) ]
 
-lirNodeToMachineInst _ _ (JumpLN lbl) = return [
+lirNodeToMachineInst' _ _ (JumpLN lbl) = return [
   JumpMI (show lbl) ]
 
-lirNodeToMachineInst aL rI (ReturnLN result) =
-  lirNodeToMachineInst aL rI (CopyWordLN result Reg_RAX) `mApp`
+lirNodeToMachineInst' aL rI (ReturnLN result) =
+  lirNodeToMachineInst' aL rI (CopyWordLN result Reg_RAX) `mApp`
   return [ MovMI_RR regBasePtr regStackPtr,
            PopMI_R regBasePtr,
            RetMI ]
@@ -278,6 +286,7 @@ instance Show C where
 showMInst :: MachineInst -> String
 showMInst mInst = case mInst of
   LabelMI lbl -> lbl ++ ":"
+  CommentMI str -> "/** " ++ str ++ " **/"
 
   MovMI_RR r1 r2 -> movq r1 r2
   MovMI_OR op r -> movq op r
