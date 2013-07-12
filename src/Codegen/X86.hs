@@ -107,7 +107,7 @@ data MachineInst =
   | CMovMI_RR C Reg Reg | CMovMI_OR C Op Reg | CMovMI_RO C Reg Op
   | CMovMI_IO C Int Op
   | AddMI_RR Reg Reg | AddMI_OR Op Reg | SubMI_RR Reg Reg | SubMI_OR Op Reg
-  | MulMI_RR Reg Reg | MulMI_OR Op Reg | DivMI_R Reg      | DivMI_O Op
+  | IMulMI_RR Reg Reg | IMulMI_OR Op Reg | DivMI_R Reg      | DivMI_O Op
   | AndMI_RR Reg Reg | AndMI_OR Op Reg | OrMI_RR  Reg Reg | OrMI_OR  Op Reg
   | XorMI_RR Reg Reg | XorMI_OR Op Reg | LShMI_RR Reg Reg | LShMI_OR Op Reg
   | RShMI_RR Reg Reg | RShMI_OR Op Reg
@@ -164,7 +164,7 @@ lirNodeToMachineInst aL gcRegs (BinOpLN op a b r) = do
         injFor_RR BitXorLOp = XorMI_RR
         injFor_RR AddLOp = AddMI_RR
         injFor_RR SubLOp = SubMI_RR
-        injFor_RR MultLOp = MulMI_RR
+        injFor_RR MultLOp = IMulMI_RR
         injFor_RR DivLOp = error "logic error in lirNodeToMachineInst"
         injFor_RR LShiftLOp = LShMI_RR
         injFor_RR RShiftLOp = RShMI_RR
@@ -174,7 +174,7 @@ lirNodeToMachineInst aL gcRegs (BinOpLN op a b r) = do
         injFor_OR BitXorLOp = XorMI_OR
         injFor_OR AddLOp = AddMI_OR
         injFor_OR SubLOp = SubMI_OR
-        injFor_OR MultLOp = MulMI_OR
+        injFor_OR MultLOp = IMulMI_OR
         injFor_OR DivLOp = error "logic error in lirNodeToMachineInst"
         injFor_OR LShiftLOp = LShMI_OR
         injFor_OR RShiftLOp = RShMI_OR
@@ -300,25 +300,25 @@ showMInst mInst = case mInst of
   CMovMI_RO c r op -> cmov c r op
   CMovMI_IO c i op -> cmov c i op
 
-  AddMI_RR r1  r2 -> addq r1 r2
-  SubMI_RR r1  r2 -> subq r1 r2
-  MulMI_RR r1  r2 -> mulq r1 r2
-  AndMI_RR r1  r2 -> andq r1 r2
-  OrMI_RR  r1  r2 -> orq  r1 r2
-  XorMI_RR r1  r2 -> xorq r1 r2
-  LShMI_RR r1  r2 -> shlq r1 r2
-  RShMI_RR r1  r2 -> shrq r1 r2
-  DivMI_R  r      -> divq r
+  AddMI_RR  r1 r2  -> addq r1 r2
+  SubMI_RR  r1 r2  -> subq r1 r2
+  IMulMI_RR r1  r2 -> imulq r1 r2
+  AndMI_RR  r1 r2  -> andq r1 r2
+  OrMI_RR   r1 r2  -> orq  r1 r2
+  XorMI_RR  r1 r2  -> xorq r1 r2
+  LShMI_RR  r1 r2  -> shlq r1 r2
+  RShMI_RR  r1 r2  -> shrq r1 r2
+  DivMI_R   r      -> divq r
 
-  AddMI_OR op  r  -> addq op r
-  SubMI_OR op  r  -> subq op r
-  MulMI_OR op  r  -> mulq op r
-  AndMI_OR op  r  -> andq op r
-  OrMI_OR  op  r  -> orq  op r
-  XorMI_OR op  r  -> xorq op r
-  LShMI_OR op  r  -> shlq op r
-  RShMI_OR op  r  -> shrq op r
-  DivMI_O  op     -> divq op
+  AddMI_OR  op r  -> addq op r
+  SubMI_OR  op r  -> subq op r
+  IMulMI_OR op r  -> imulq op r
+  AndMI_OR  op r  -> andq op r
+  OrMI_OR   op r  -> orq  op r
+  XorMI_OR  op r  -> xorq op r
+  LShMI_OR  op r  -> shlq op r
+  RShMI_OR  op r  -> shrq op r
+  DivMI_O   op    -> divq op
 
   CallMI_R r      -> call r
   CallMI_I i      -> call i
@@ -337,9 +337,9 @@ showMInst mInst = case mInst of
     movq src dest = "movq " ++ show src ++ ", " ++ show dest
     cmpq a b = "cmpq " ++ show a ++ ", " ++ show b
     cmov c src dest = "cmov" ++ show c ++ " " ++ show src ++ ", " ++ show dest
-    addq a b = "addq " ++ show a ++ ", " ++ show b
-    subq a b = "subq " ++ show a ++ ", " ++ show b
-    mulq a b = "mulq " ++ show a ++ ", " ++ show b
+    addq a b  = "addq " ++ show a ++ ", " ++ show b
+    subq a b  = "subq " ++ show a ++ ", " ++ show b
+    imulq a b = "imulq " ++ show a ++ ", " ++ show b
     andq a b = "andq " ++ show a ++ ", " ++ show b
     orq  a b = "orq " ++ show a ++ ", " ++ show b
     xorq a b = "xorq " ++ show a ++ ", " ++ show b
