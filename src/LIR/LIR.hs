@@ -229,12 +229,11 @@ hirToLIR hFn = do
               LoadWordLN (VarPlusSymSA tagCleared AppsLeftO) appsLeft,
               CmpWordLN (LitR (WordC 0)) appsLeft ] <*>
             mkLast (CJumpLN JNE notNeeded forcingNeeded)
-      allDone <- freshLabel
       let doForce =
             mkFirst (LabelLN forcingNeeded) <*>
             mkMiddle (CallRuntimeLN (ForceFn tagCleared) result) <*>
-            mkLast (JumpLN allDone)
-      let finalBlock = mkFirst (LabelLN allDone)
+            mkLast (JumpLN notNeeded)
+      let finalBlock = mkFirst (LabelLN notNeeded)
       return $ checkIfClosure |*><*| checkIfSaturated |*><*| doForce |*><*|
         finalBlock
 
