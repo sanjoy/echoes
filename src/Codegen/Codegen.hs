@@ -11,12 +11,40 @@ import qualified Data.Maybe as Mby
 
 import Codegen.RegAlloc
 import Codegen.X86
-import Utils.Common
 import LIR.LIR
+import Utils.Common
+import Utils.Graph
+
+eliminatePhi :: Graph LNode C C -> M (Graph LNode C C)
+eliminatePhi graph@(GMany NothingO lMap NothingO) =
+  let copiesToInsert = foldGraphNodes gatherCopies graph []
+      graphWithCopies = foldl insertCopies lMap copiesToInsert
+  in mapConcatGraph (doNothingCO, removePhis, doNothingOC)
+     (GMany NothingO graphWithCopies NothingO)
+     where gatherCopies (Phi2LN (inA, lblA) (inB, lblB) result) =
+             (++) [(lblA, inA, result), (lblB, inB, result)]
+           gatherCopies _ = id
+
+           insertCopies :: LabelMap (Block LNode C C) ->
+                           (Label, Rator Constant, SSAVar) ->
+                           LabelMap (Block LNode C C)
+           insertCopies lblMap (lbl, rator, result) =
+             let (front, list, back) =
+                   blockToNodeList $ Mby.fromJust $ mapLookup lbl lblMap
+                 copyNode = CopyWordLN rator result
+                 newBlock = blockOfNodeList (front, list ++ [copyNode], back)
+             in mapInsert lbl newBlock lblMap
+
+           removePhis Phi2LN{} = return emptyGraph
+           removePhis node = return $ mkMiddle node
+
+           doNothingCO = return . mkFirst
+           doNothingOC = return . mkLast
 
 lirToMachineCode :: (ClsrId -> Int) -> LFunction SSAVar -> M [String]
 lirToMachineCode argCounts (LFunction _ _ entry graph) = do
-  (GMany NothingO lMap NothingO, stackSize) <- nullRegAlloc graph
+  graphWithoutPhis <- eliminatePhi graph
+  (GMany NothingO lMap NothingO, stackSize) <- nullRegAlloc graphWithoutPhis
   let blockList = postorder_dfs_from lMap entry
   eachBlock <- mapM showBlock blockList
   return $ prologue stackSize ++ concat eachBlock
