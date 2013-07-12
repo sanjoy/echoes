@@ -104,8 +104,6 @@ data MachineInst =
   LabelMI String
   | MovMI_RR Reg Reg | MovMI_OR Op Reg | MovMI_RO Reg Op | MovMI_IO Str Op
   | CmpMI_RR Reg Reg | CmpMI_OR Op Reg
-  | CMovMI_RR C Reg Reg | CMovMI_OR C Op Reg | CMovMI_RO C Reg Op
-  | CMovMI_IO C Int Op
   | AddMI_RR Reg Reg | AddMI_OR Op Reg | SubMI_RR Reg Reg | SubMI_OR Op Reg
   | IMulMI_RR Reg Reg | IMulMI_OR Op Reg | DivMI_R Reg      | DivMI_O Op
   | AndMI_RR Reg Reg | AndMI_OR Op Reg | OrMI_RR  Reg Reg | OrMI_OR  Op Reg
@@ -144,12 +142,6 @@ lirNodeToMachineInst aL _ (CmpWordLN (LitR c) v) = return [
 
 lirNodeToMachineInst _ _ (CmpWordLN (VarR vA) vB) = return [
   CmpMI_RR vA vB]
-
-lirNodeToMachineInst _ _ (CondMoveLN cc (VarR r1) r2) = return [
-  CMovMI_RR (jCondToC cc) r1 r2]
-
-lirNodeToMachineInst aL _ (CondMoveLN cc (LitR c) r) = return [
-  CMovMI_OR (jCondToC cc) (lowerConstant aL c) r]
 
 lirNodeToMachineInst _ _ (BinOpLN DivLOp _ _ _) = return [
   Unimplemented "i not know to divide!"]
@@ -295,11 +287,6 @@ showMInst mInst = case mInst of
   CmpMI_RR r1 r2 -> cmpq r1 r2
   CmpMI_OR op r -> cmpq op r
 
-  CMovMI_RR c r1 r2 -> cmov c r1 r2
-  CMovMI_OR c op r -> cmov c op r
-  CMovMI_RO c r op -> cmov c r op
-  CMovMI_IO c i op -> cmov c i op
-
   AddMI_RR  r1 r2  -> addq r1 r2
   SubMI_RR  r1 r2  -> subq r1 r2
   IMulMI_RR r1  r2 -> imulq r1 r2
@@ -336,7 +323,6 @@ showMInst mInst = case mInst of
   where
     movq src dest = "movq " ++ show src ++ ", " ++ show dest
     cmpq a b = "cmpq " ++ show a ++ ", " ++ show b
-    cmov c src dest = "cmov" ++ show c ++ " " ++ show src ++ ", " ++ show dest
     addq a b  = "addq " ++ show a ++ ", " ++ show b
     subq a b  = "subq " ++ show a ++ ", " ++ show b
     imulq a b = "imulq " ++ show a ++ ", " ++ show b

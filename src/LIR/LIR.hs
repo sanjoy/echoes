@@ -81,7 +81,6 @@ data GenLNode r e x where
   LoadWordLN :: SymAddress r -> r -> GenLNode r O O
   StoreWordLN :: SymAddress r -> GenRator r Constant -> GenLNode r O O
   CmpWordLN :: GenRator r Constant -> r -> GenLNode r O O
-  CondMoveLN :: JCondition -> GenRator r Constant -> r -> GenLNode r O O
   BinOpLN :: LBinOp -> GenRator r Constant -> GenRator r Constant -> r ->
              GenLNode r O O
   Phi2LN :: (GenRator r Constant, Label) -> (GenRator r Constant, Label) ->
@@ -104,8 +103,6 @@ mapGenLNodeRegs f (LoadWordLN addr r) = LoadWordLN (fmap f addr) (f r)
 mapGenLNodeRegs f (StoreWordLN addr g) =
   StoreWordLN (fmap f addr) (mapGenRator f g)
 mapGenLNodeRegs f (CmpWordLN g1 g2) = CmpWordLN (mapGenRator f g1) (f g2)
-mapGenLNodeRegs f (CondMoveLN cc g r) =
-  CondMoveLN cc (mapGenRator f g) (f r)
 mapGenLNodeRegs f (BinOpLN op g1 g2 r) =
   BinOpLN op (mapGenRator f g1) (mapGenRator f g2) (f r)
 mapGenLNodeRegs f (Phi2LN (g1, l1) (g2, l2) r) =
@@ -132,7 +129,6 @@ getVRW node =  case node of
   (LoadWordLN sAddr r) -> (symAddrToReg sAddr, [r])
   (StoreWordLN sAddr g) -> (symAddrToReg sAddr, ratorToReg [g])
   (CmpWordLN g r) -> (r:ratorToReg [g], [])
-  (CondMoveLN _ g r) -> (ratorToReg [g], [r])
   (BinOpLN _ g1 g2 r) -> (ratorToReg [g1, g2], [r])
   (Phi2LN (g1, _) (g2, _) r) -> (ratorToReg [g1, g2], [r])
   (CallRuntimeLN (ForceFn reg) r) -> ([reg], [r])
@@ -296,15 +292,28 @@ hirToLIR hFn = do
       return $
         mkMiddle (CopyWordLN (LitR inB) tmpB) <*> compareOp
 
-    genCmp op (VarR inA) (LitR inB) out = return $ mkMiddles [
-      CmpWordLN (LitR inB) inA,
-      CopyWordLN (LitR BoolFalseC) out,
-      CondMoveLN (opToJC op) (LitR BoolTrueC) out ]
+    genCmp op (VarR inA) (LitR inB) out =
+      genCmp' (CmpWordLN (LitR inB) inA) (opToJC op) (LitR BoolTrueC)
+      (LitR BoolFalseC) out
 
-    genCmp op inA (VarR inB) out = return $ mkMiddles [
-      CmpWordLN inA inB,
-      CopyWordLN (LitR BoolTrueC) out,
-      CondMoveLN (opToJC op) (LitR BoolFalseC) out ]
+    genCmp op inA (VarR inB) out =
+      genCmp' (CmpWordLN inA inB) (opToJC op) (LitR BoolFalseC) (LitR BoolTrueC)
+      out
+
+    genCmp' compareOp jmpCond jumpTakenVal jumpNotTakenVal out = do
+      jumpTakenLbl <- freshLabel
+      jumpNotTakenLbl <- freshLabel
+      end <- freshLabel
+      let jumpTakenBody = mkFirst (LabelLN jumpTakenLbl) <*>
+                          mkMiddle (CopyWordLN jumpTakenVal out) <*>
+                          mkLast (JumpLN end)
+          jumpNotTakenBody = mkFirst (LabelLN jumpNotTakenLbl) <*>
+                             mkMiddle (CopyWordLN jumpNotTakenVal out) <*>
+                             mkLast (JumpLN end)
+      return $ mkMiddle compareOp <*>
+        mkLast (CJumpLN jmpCond jumpTakenLbl jumpNotTakenLbl) |*><*|
+        jumpTakenBody |*><*| jumpNotTakenBody |*><*|
+        mkFirst (LabelLN end)
 
     opToJC LtOp = JG
     opToJC EqOp = JE
