@@ -366,16 +366,20 @@ hirToLIR hFn = do
         BinOpLN BitOrLOp (LitR ClsrBaseTagC) (VarR untaggedClsr) result ]
 
     genAssertTag :: Rator Lit -> Constant -> IRMonad PanicMap (Graph LNode O O)
-    genAssertTag (VarR var) tag = do
-      extractedTag <- freshVarName
-       -- TODO: make the panic message more
-      panicLbl <- getPanicLabel "invalid type"
-      checkPassed <- freshLabel
-      return $ mkMiddles [
-        BinOpLN BitAndLOp (VarR var) (LitR (WordC 3)) extractedTag,
-        CmpWordLN (LitR tag) extractedTag ] <*>
-        mkLast (CJumpLN JE checkPassed panicLbl) |*><*|
-        mkFirst (LabelLN checkPassed)
+    genAssertTag (VarR var) tag =
+      -- ClsrTagC is a pseudo-tag that allows us to check for two
+      -- things in one go.
+      let mask = if tag == ClsrTagC then 1 else 3
+      in do
+        extractedTag <- freshVarName
+        -- TODO: make the panic message more
+        panicLbl <- getPanicLabel "invalid type"
+        checkPassed <- freshLabel
+        return $ mkMiddles [
+          BinOpLN BitAndLOp (VarR var) (LitR (WordC mask)) extractedTag,
+          CmpWordLN (LitR tag) extractedTag ] <*>
+          mkLast (CJumpLN JE checkPassed panicLbl) |*><*|
+          mkFirst (LabelLN checkPassed)
 
     genAssertTag (LitR (BoolL _)) BoolTagC = return emptyGraph
     genAssertTag (LitR (IntL _)) IntTagC = return emptyGraph
