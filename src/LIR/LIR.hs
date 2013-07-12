@@ -213,12 +213,12 @@ hirToLIR hFn = do
 
     nodeMapFn (ForceHN (VarR value) result) = do
       tag <- freshVarName
-      notNeeded <- freshLabel
+      forcingNotNeeded <- freshLabel
       isClosure <- freshLabel
       let checkIfClosure = mkMiddles [
             BinOpLN BitAndLOp (VarR value) (LitR ClsrTagC) tag,
             CmpWordLN (LitR ClsrTagC) tag ] <*>
-                           mkLast (CJumpLN JNE notNeeded isClosure)
+                           mkLast (CJumpLN JNE forcingNotNeeded isClosure)
       appsLeft <- freshVarName
       tagCleared <- freshVarName
       forcingNeeded <- freshLabel
@@ -228,14 +228,17 @@ hirToLIR hFn = do
               BinOpLN BitAndLOp (LitR ClearTagBitsC) (VarR value) tagCleared,
               LoadWordLN (VarPlusSymSA tagCleared AppsLeftO) appsLeft,
               CmpWordLN (LitR (WordC 0)) appsLeft ] <*>
-            mkLast (CJumpLN JNE notNeeded forcingNeeded)
+            mkLast (CJumpLN JNE forcingNotNeeded forcingNeeded)
+      theEnd <- freshLabel
       let doForce =
             mkFirst (LabelLN forcingNeeded) <*>
             mkMiddle (CallRuntimeLN (ForceFn tagCleared) result) <*>
-            mkLast (JumpLN notNeeded)
-      let finalBlock = mkFirst (LabelLN notNeeded)
+            mkLast (JumpLN theEnd)
+      let notNeeded = mkFirst (LabelLN forcingNotNeeded) <*>
+                      mkMiddle (CopyWordLN (VarR value) result) <*>
+                      mkLast (JumpLN theEnd)
       return $ checkIfClosure |*><*| checkIfSaturated |*><*| doForce |*><*|
-        finalBlock
+        notNeeded |*><*| mkFirst (LabelLN theEnd)
 
     nodeMapFn (ForceHN lit result) = do
       (valCode, valConst) <- ratorLitToConstant lit
