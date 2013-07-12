@@ -29,11 +29,14 @@ eliminatePhi graph@(GMany NothingO lMap NothingO) =
                            (Label, Rator Constant, SSAVar) ->
                            LabelMap (Block LNode C C)
            insertCopies lblMap (lbl, rator, result) =
-             let (front, list, back) =
-                   blockToNodeList $ Mby.fromJust $ mapLookup lbl lblMap
-                 copyNode = CopyWordLN rator result
-                 newBlock = blockOfNodeList (front, list ++ [copyNode], back)
-             in mapInsert lbl newBlock lblMap
+             case mapLookup lbl lblMap of
+               Just block ->
+                 let (front, list, back) = blockToNodeList block
+                     copyNode = CopyWordLN rator result
+                     newBlock = blockOfNodeList (front, list ++ [copyNode],
+                                                 back)
+                 in mapInsert lbl newBlock lblMap
+               Nothing -> lblMap
 
            removePhis Phi2LN{} = return emptyGraph
            removePhis node = return $ mkMiddle node
