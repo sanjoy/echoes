@@ -398,7 +398,7 @@ hirToLIR hFn = do
           return panicLbl
 
     ratorIntToConstant (VarR v) = VarR v
-    ratorIntToConstant (LitR w) = LitR (WordC w)
+    ratorIntToConstant (LitR w) = LitR (WordC (w `B.shift` 2))
 
     litToConstant :: Lit -> IRMonad PanicMap (Graph LNode O O, Rator Constant)
     litToConstant (ClsrL clsr) = do
