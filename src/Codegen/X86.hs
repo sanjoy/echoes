@@ -27,7 +27,7 @@ regBasePtr :: Reg
 regBasePtr = Reg_RBP
 
 regArgPtr :: Reg
-regArgPtr = Reg_RSI
+regArgPtr = Reg_RDI
 
 vmGlobalsReg :: Reg
 vmGlobalsReg = Reg_R15
@@ -213,7 +213,7 @@ lirNodeToMachineInst _ rI (CallRuntimeLN (ForceFn value) result) =
     liveRegs = getLiveCallerSavedRegs rI
 
     callRT = [
-      MovMI_RR value Reg_RSI,
+      MovMI_RR value regArgPtr,
       CallMI_I $ LitStr "runtime_force",
       MovMI_RR Reg_RAX result ]
 
