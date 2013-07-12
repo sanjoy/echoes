@@ -173,17 +173,16 @@ termToHIR term = if isClosed term then Just compiledTerm else Nothing
 liftedFunctionToHIR :: LiftedFunction -> M HFunction
 liftedFunctionToHIR (LiftedFunction fnId argC fullTerm) = do
   ((fullTermTranslated, entry), lastSSAVar, _) <-
-    runIRMonad (liftedTermToHIR fullTerm) 0 ()
+    runIRMonad (liftedTermToHIR (fnId == 0) fullTerm) 0 ()
   return HFunction{hFnName = fnId, hFnArgCount = argC, hFnEntry = entry,
                    hFnBody = fullTermTranslated, hFnLastSSAVar = lastSSAVar }
 
-liftedTermToHIR :: LiftedTerm -> IRMonad () (Graph HNode C C, Label)
-liftedTermToHIR fullTerm = do
+liftedTermToHIR :: Bool -> LiftedTerm -> IRMonad () (Graph HNode C C, Label)
+liftedTermToHIR isEpoch fullTerm = do
   entry <- freshLabel
   (functionBody, resultVar) <- emit fullTerm
-  let fullGraph = mkFirst (LabelHN entry) <*> functionBody <*>
-                  mkLast (ReturnHN $ VarR resultVar)
-  return (fullGraph, entry)
+  returnStmt <- makeReturnStmt resultVar
+  return (mkFirst (LabelHN entry) <*> functionBody <*> returnStmt, entry)
   where emit :: LiftedTerm -> IRMonad () (Graph HNode O O, SSAVar)
         emit (ArgLT argId) = loadSimple (LoadArgHN argId)
         emit (IntLT intLit) = loadSimple (LoadLitHN $ IntL intLit)
@@ -238,6 +237,12 @@ liftedTermToHIR fullTerm = do
                          mkLast (JumpHN finalLabel)
           return (termCode, branchLabel, termResult)
 
+        makeReturnStmt resultVar =
+          if isEpoch then do
+            forcedResult <- freshVarName
+            return $ mkMiddle (ForceHN (VarR resultVar) forcedResult) <*>
+              mkLast (ReturnHN $ VarR forcedResult)
+          else return $ mkLast (ReturnHN $ VarR resultVar)
 
 
 {-  Debugging tools.  -}
