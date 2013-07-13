@@ -368,7 +368,14 @@ hirToLIR hFn = do
       in do
         extractedTag <- freshVarName
         -- TODO: make the panic message more
-        panicLbl <- getPanicLabel "invalid type"
+        let tagToType ClsrTagC = "closure"
+            tagToType ClsrBaseTagC = "closure base node"
+            tagToType ClsrNodeTagC = "closure app node"
+            tagToType IntTagC = "integer"
+            tagToType BoolTagC = "boolean"
+            tagToType t = error $ "tag " ++ show t ++ " unexpected"
+        panicLbl <- getPanicLabel $ "Invalid type: expected `" ++
+                    tagToType tag ++ "`"
         checkPassed <- freshLabel
         return $ mkMiddles [
           BinOpLN BitAndLOp (VarR var) (LitR (WordC mask)) extractedTag,
