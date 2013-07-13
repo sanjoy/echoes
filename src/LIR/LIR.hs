@@ -212,31 +212,44 @@ hirToLIR hFn = do
       return $ creationCode <*> code' <*> actualPush
 
     nodeMapFn (ForceHN (VarR value) result) = do
-      tag <- freshVarName
-      (forcingNotNeeded, isClosure) <- twice freshLabel
-      let checkIfClosure = mkMiddles [
-            BinOpLN BitAndLOp (VarR value) (LitR ClsrTagC) tag,
-            CmpWordLN (LitR ClsrTagC) tag ] <*>
-                           mkLast (CJumpLN JNE forcingNotNeeded isClosure)
+      (checkClosureL, forcingNotNeededL) <- twice freshLabel
+      (incomingL, checkSaturatedL) <- twice freshLabel
+      (forcingNeededL, theEndL) <- twice freshLabel
+
+      (tag, forcedResult, v) <- thrice freshVarName
       (appsLeft, tagCleared) <- twice freshVarName
-      forcingNeeded <- freshLabel
-      let checkIfSaturated =
-            mkFirst (LabelLN isClosure) <*>
+
+      let theBeginB = mkLast (JumpLN incomingL)
+      let incomingB =
+            mkFirst (LabelLN incomingL) <*> mkLast (JumpLN checkClosureL)
+      let checkClosureB =
+            mkFirst (LabelLN checkClosureL) <*>
             mkMiddles [
-              BinOpLN BitAndLOp (LitR ClearTagBitsC) (VarR value) tagCleared,
+              Phi2LN (VarR value, incomingL) (VarR forcedResult, forcingNeededL) v,
+              BinOpLN BitAndLOp (VarR v) (LitR ClsrTagC) tag,
+              CmpWordLN (LitR ClsrTagC) tag ] <*>
+            mkLast (CJumpLN JNE forcingNotNeededL checkSaturatedL)
+      let checkSaturatedB =
+            mkFirst (LabelLN checkSaturatedL) <*>
+            mkMiddles [
+              BinOpLN BitAndLOp (LitR ClearTagBitsC) (VarR v) tagCleared,
               LoadWordLN (VarPlusSymSA tagCleared AppsLeftO) appsLeft,
               CmpWordLN (LitR (WordC 0)) appsLeft ] <*>
-            mkLast (CJumpLN JNE forcingNotNeeded forcingNeeded)
-      theEnd <- freshLabel
-      let doForce =
-            mkFirst (LabelLN forcingNeeded) <*>
-            mkMiddle (CallRuntimeLN (ForceFn tagCleared) result) <*>
-            mkLast (JumpLN theEnd)
-      let notNeeded = mkFirst (LabelLN forcingNotNeeded) <*>
-                      mkMiddle (CopyWordLN (VarR value) result) <*>
-                      mkLast (JumpLN theEnd)
-      return $ checkIfClosure |*><*| checkIfSaturated |*><*| doForce |*><*|
-        notNeeded |*><*| mkFirst (LabelLN theEnd)
+            mkLast (CJumpLN JNE forcingNotNeededL forcingNeededL)
+      let forcingNeededB =
+            mkFirst (LabelLN forcingNeededL) <*>
+            mkMiddles [
+              CallRuntimeLN (ForceFn tagCleared) forcedResult ] <*>
+            mkLast (JumpLN checkClosureL)
+      let forcingNotNeededB =
+            mkFirst (LabelLN forcingNotNeededL) <*>
+            mkMiddle (CopyWordLN (VarR v) result) <*>
+            mkLast (JumpLN theEndL)
+      let theEndB = mkFirst (LabelLN theEndL)
+
+      return $ theBeginB |*><*| incomingB |*><*| checkClosureB |*><*|
+        checkSaturatedB |*><*| forcingNeededB |*><*| forcingNotNeededB |*><*|
+        theEndB
 
     nodeMapFn (ForceHN lit result) = do
       (valCode, valConst) <- ratorLitToConstant lit
@@ -430,6 +443,9 @@ hirToLIR hFn = do
 
     twice :: IRMonad PanicMap a -> IRMonad PanicMap (a, a)
     twice m = sequence [m, m] >>= (\[x, y] -> return (x, y))
+
+    thrice :: IRMonad PanicMap a -> IRMonad PanicMap (a, a, a)
+    thrice m = sequence [m, m, m] >>= (\[x, y, z] -> return (x, y, z))
 
 lirDebugShowGraph :: M [LFunction SSAVar] -> String
 lirDebugShowGraph fn =
