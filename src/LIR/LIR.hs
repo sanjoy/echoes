@@ -213,14 +213,12 @@ hirToLIR hFn = do
 
     nodeMapFn (ForceHN (VarR value) result) = do
       tag <- freshVarName
-      forcingNotNeeded <- freshLabel
-      isClosure <- freshLabel
+      (forcingNotNeeded, isClosure) <- twice freshLabel
       let checkIfClosure = mkMiddles [
             BinOpLN BitAndLOp (VarR value) (LitR ClsrTagC) tag,
             CmpWordLN (LitR ClsrTagC) tag ] <*>
                            mkLast (CJumpLN JNE forcingNotNeeded isClosure)
-      appsLeft <- freshVarName
-      tagCleared <- freshVarName
+      (appsLeft, tagCleared) <- twice freshVarName
       forcingNeeded <- freshLabel
       let checkIfSaturated =
             mkFirst (LabelLN isClosure) <*>
@@ -265,8 +263,7 @@ hirToLIR hFn = do
     genPush :: SSAVar -> Rator Constant -> SSAVar -> IRMonad PanicMap (Graph LNode O O)
     genPush clsrVar value newNode = do
       (validityCheck, appsLeft) <- checkPushValid (VarR clsrVar)
-      appsLeft' <- freshVarName
-      freshNode <- freshVarName
+      (appsLeft', freshNode) <- twice freshVarName
       return $ validityCheck <*>
         mkMiddles [
           BinOpLN SubLOp (VarR appsLeft) (LitR (WordC 1)) appsLeft',
@@ -278,9 +275,8 @@ hirToLIR hFn = do
 
     checkPushValid var = do
       panicLbl <- getPanicLabel "too many pushes!"
-      appsLeft <- freshVarName
+      (appsLeft, untaggedVar) <- twice freshVarName
       pushOkay <- freshLabel
-      untaggedVar <- freshVarName
       return (mkMiddles [
                  BinOpLN BitAndLOp (LitR ClearTagBitsC) var untaggedVar,
                  LoadWordLN (VarPlusSymSA untaggedVar AppsLeftO) appsLeft,
@@ -303,8 +299,7 @@ hirToLIR hFn = do
       out
 
     genCmp' compareOp jmpCond jumpTakenVal jumpNotTakenVal out = do
-      jumpTakenLbl <- freshLabel
-      jumpNotTakenLbl <- freshLabel
+      (jumpTakenLbl, jumpNotTakenLbl) <- twice freshLabel
       end <- freshLabel
       let jumpTakenBody = mkFirst (LabelLN jumpTakenLbl) <*>
                           mkMiddle (CopyWordLN jumpTakenVal out) <*>
@@ -426,6 +421,8 @@ hirToLIR hFn = do
     hOpToLOp op =
       error $ "logic error: hOpToLOp called incorrectly with " ++ show op
 
+    twice :: IRMonad PanicMap a -> IRMonad PanicMap (a, a)
+    twice m = sequence [m, m] >>= (\[x, y] -> return (x, y))
 
 lirDebugShowGraph :: M [LFunction SSAVar] -> String
 lirDebugShowGraph fn =
