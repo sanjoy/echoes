@@ -16,30 +16,24 @@ import Utils.Common
 import Utils.Graph
 
 eliminatePhi :: Graph LNode C C -> M (Graph LNode C C)
-eliminatePhi graph@(GMany NothingO lMap NothingO) =
-  let copiesToInsert = foldGraphNodes gatherCopies graph []
-      graphWithCopies = foldl insertCopies lMap copiesToInsert
-  in mapConcatGraph (doNothingCO, removePhis, doNothingOC)
-     (GMany NothingO graphWithCopies NothingO)
-     where gatherCopies (Phi2LN (inA, lblA) (inB, lblB) result) =
-             (++) [(lblA, inA, result), (lblB, inB, result)]
-           gatherCopies _ = id
+eliminatePhi graph =
+  let copiesToInsert = foldGraphNodes gatherCopies graph M.empty
+  in mapConcatGraph (doNothingCO, removePhis copiesToInsert, doNothingOC) graph
+     where gatherCopies (Phi2LN (inA, _) (inB, _) result) m =
+             let f (VarR v) = M.insert v result
+                 f _ = id
+             in (f inA . f inB) m
+           gatherCopies _ m = m
 
-           insertCopies :: LabelMap (Block LNode C C) ->
-                           (Label, Rator Constant, SSAVar) ->
-                           LabelMap (Block LNode C C)
-           insertCopies lblMap (lbl, rator, result) =
-             case mapLookup lbl lblMap of
-               Just block ->
-                 let (front, list, back) = blockToNodeList block
-                     copyNode = CopyWordLN rator result
-                     newBlock = blockOfNodeList (front, list ++ [copyNode],
-                                                 back)
-                 in mapInsert lbl newBlock lblMap
-               Nothing -> lblMap
-
-           removePhis Phi2LN{} = return emptyGraph
-           removePhis node = return $ mkMiddle node
+           removePhis _ Phi2LN{} = return emptyGraph
+           removePhis copiesToInsert node =
+             let nothingDone = return $ mkMiddle node
+             in case getLVarsWritten node of
+               [] -> nothingDone
+               [v] -> Mby.fromMaybe nothingDone $ do
+                 result <- v `M.lookup` copiesToInsert
+                 return $ return $ mkMiddles [node, CopyWordLN (VarR v) result]
+               _ -> error "can't handle multiple writes!"
 
            doNothingCO = return . mkFirst
            doNothingOC = return . mkLast
