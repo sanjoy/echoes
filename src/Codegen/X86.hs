@@ -223,7 +223,7 @@ lirNodeToMachineInst' _ rI (CallRuntimeLN (ForceFn value) result) =
 
 lirNodeToMachineInst' _ _ (PanicLN str) = return [
   CommentMI str,
-  JumpMI "runtime_panic" ]
+  CallMI_I $ LitStr "runtime_panic" ]
 
 lirNodeToMachineInst' _ _ (CJumpLN c tL fL) = return [
   CJumpMI (jCondToC c) (show tL),
