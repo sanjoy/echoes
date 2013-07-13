@@ -53,10 +53,7 @@ generalRegSet = S.fromList [
   Reg_R11, Reg_R12, Reg_R13, Reg_R14 ]
 
 getLiveCallerSavedRegs :: RegInfo Reg -> [Reg]
-getLiveCallerSavedRegs rI = riNonFreeRegsIn rI calleeSavedList
-  where calleeSavedList =
-          [ Reg_RAX, Reg_RCX, Reg_RDX, Reg_RSI, Reg_RSI, Reg_RDI,
-            Reg_R8, Reg_R9, Reg_R10, Reg_R11 ]
+getLiveCallerSavedRegs rI = riNonFreeRegsIn rI calleeSavedRegs
 
 lowerConstant :: (ClsrId -> Int) -> Constant -> Op
 lowerConstant appLimits = LitWordOp . constToString appLimits
@@ -237,15 +234,18 @@ lirNodeToMachineInst' _ _ (JumpLN lbl) = return [
 
 lirNodeToMachineInst' aL rI (ReturnLN result) =
   lirNodeToMachineInst' aL rI (CopyWordLN result Reg_RAX) `mApp`
-  return [ MovMI_RR regBasePtr regStackPtr,
-           PopMI_R regBasePtr,
-           RetMI ]
+  return (
+    MovMI_RR regBasePtr regStackPtr:
+    (map PopMI_R (reverse calleeSavedRegs) ++ [ RetMI ]))
+
+calleeSavedRegs :: [Reg]
+calleeSavedRegs = [ Reg_RBP, Reg_RBX, Reg_R12, Reg_R13, Reg_R14, Reg_R15 ]
 
 machinePrologue  :: Int -> [MachineInst]
-machinePrologue stackSize = [
-  PushMI_R regBasePtr,
+machinePrologue stackSize = map PushMI_R calleeSavedRegs ++ [
   MovMI_RR regStackPtr regBasePtr,
-  SubMI_OR (LitWordOp $ show stackSize) regStackPtr ]
+  let roundedUpStackSize = ((stackSize + 15) `div` 16) * 16
+  in SubMI_OR (LitWordOp $ show roundedUpStackSize) regStackPtr ]
 
 jCondToC :: JCondition -> C
 jCondToC JE = E
