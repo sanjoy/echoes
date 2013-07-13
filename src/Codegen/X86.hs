@@ -78,7 +78,8 @@ lowerOffset NodeValueO = 16
 lowerOffset CodePtrO = 0
 
 lowerSymAddress :: SymAddress Reg -> Op
-lowerSymAddress (ArgsPtrSA offset) = MemOp2 regArgPtr offset
+-- TODO: this is somewhat inconsistent, move all wordSize logic here.
+lowerSymAddress (ArgsPtrSA offset) = MemOp2 regArgPtr (wordSize * offset)
 lowerSymAddress (StackOffsetSA offset) = MemOp2 regBasePtr (- offset)
 lowerSymAddress (VarPlusSymSA reg offset) = MemOp2 reg (lowerOffset offset)
 lowerSymAddress (VarPlusVarSA reg1 reg2) = MemOp3 reg1 reg2
