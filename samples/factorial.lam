@@ -1,0 +1,3 @@
+(((lam (f) ((lam (x) (f (x x))) (lam (x) (f (x x)))))
+  (lam (self n) (if (== n 0) 1 (* n (self (- n 1)))))) 6)
+
