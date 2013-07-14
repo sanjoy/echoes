@@ -17,26 +17,40 @@ import Utils.Graph
 
 eliminatePhi :: Graph LNode C C -> M (Graph LNode C C)
 eliminatePhi graph =
-  let copiesToInsert = foldGraphNodes gatherCopies graph M.empty
-  in mapConcatGraph (doNothingCO, removePhis copiesToInsert, doNothingOC) graph
-     where gatherCopies (Phi2LN (inA, _) (inB, _) result) m =
-             let f (VarR v) = M.insert v result
-                 f _ = id
-             in (f inA . f inB) m
-           gatherCopies _ m = m
+  let (varMap, constMap) = foldGraphNodes gatherCopies graph (M.empty, [])
+  in do
+    (GMany NothingO withVarCopies NothingO) <-
+      mapConcatGraph (doNothingCO, copyVars varMap, doNothingOC) graph
+    let withConstCopies = foldl copyOneConstant withVarCopies constMap
+    return $ GMany NothingO withConstCopies NothingO
+    where
+      gatherCopies (Phi2LN a b result) =
+        let f (VarR v, _) (vM, cM) = (M.insert v result vM, cM)
+            f (LitR l, lbl) (vM, cM) = (vM, (lbl, l, result):cM)
+        in f a . f b
+      gatherCopies _ = id
 
-           removePhis _ Phi2LN{} = return emptyGraph
-           removePhis copiesToInsert node =
-             let nothingDone = return $ mkMiddle node
-             in case getLVarsWritten node of
-               [] -> nothingDone
-               [v] -> Mby.fromMaybe nothingDone $ do
-                 result <- v `M.lookup` copiesToInsert
-                 return $ return $ mkMiddles [node, CopyWordLN (VarR v) result]
-               _ -> error "can't handle multiple writes!"
+      copyVars _ Phi2LN{} = return emptyGraph
+      copyVars copyM node =
+        let nothingDone = return $ mkMiddle node
+        in case getLVarsWritten node of
+          [] -> nothingDone
+          [var] -> Mby.fromMaybe nothingDone $ do
+            result <- var `M.lookup` copyM
+            return $ return $ mkMiddles [node, CopyWordLN (VarR var) result]
+          _ -> error "can't handle multiple writes!"
 
-           doNothingCO = return . mkFirst
-           doNothingOC = return . mkLast
+      copyOneConstant lMap (lbl, lit, result) =
+        maybe lMap (insertCopy lMap lbl lit result) $ mapLookup lbl lMap
+      insertCopy lMap lbl lit result block =
+        let (JustC front, middles, JustC end) = blockToNodeList block
+            newBlock =
+              blockOfNodeList (JustC front, middles ++ [copyInst], JustC end)
+            copyInst = CopyWordLN (LitR lit) result
+        in mapInsert lbl newBlock lMap
+
+      doNothingCO = return . mkFirst
+      doNothingOC = return . mkLast
 
 lirToMachineCode :: (ClsrId -> Int) -> LFunction SSAVar -> M [String]
 lirToMachineCode argCounts (LFunction _ _ entry graph) = do
