@@ -57,22 +57,20 @@ lirToMachineCode argCounts (LFunction _ _ entry graph) = do
   graphWithoutPhis <- eliminatePhi graph
   (GMany NothingO lMap NothingO, stackSize) <- nullRegAlloc graphWithoutPhis
   let blockList = postorder_dfs_from lMap entry
-  eachBlock <- mapM showBlock blockList
-  return $ prologue stackSize ++ concat eachBlock
+  allCode <- mapM showBlock blockList
+  let flatCode = concat allCode
+  return $ prologue stackSize ++ map show flatCode
   where
     prologue stackSize = map show $ machinePrologue stackSize
     mConcatMap f list = liftM concat $ mapM f list
-    showBlock :: Block (RegInfNode RgLNode) C C -> M [String]
+    showBlock :: Block (RegInfNode RgLNode) C C -> M [MachineInst]
     showBlock block =
       let (JustC lbl :: MaybeC C ((RegInfNode RgLNode) C O),
            inner,
            JustC jmp :: MaybeC C ((RegInfNode RgLNode) O C))
             = blockToNodeList block
-      in do
-        loweredInsts <- rNodeToMI argCounts lbl `mApp`
-                        mConcatMap (rNodeToMI argCounts) inner `mApp`
-                        rNodeToMI argCounts jmp
-        return $ map show loweredInsts
+      in rNodeToMI argCounts lbl `mApp`
+         mConcatMap (rNodeToMI argCounts) inner `mApp` rNodeToMI argCounts jmp
       where rNodeToMI aC (RegInfNode rI node) = lirNodeToMachineInst aC rI node
 
 lirCodegen :: [LFunction SSAVar] -> M String
