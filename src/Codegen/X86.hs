@@ -93,16 +93,16 @@ data Op = MemOp1 Reg | MemOp2 Reg Int | MemOp3 Reg Reg | LitWordOp String
 
 data C = E | G | L | NE deriving(Eq, Ord)
 
--- TODO: Rename Str and LitStr
-newtype Str = Str String deriving(Eq, Ord)
-instance Show Str where show (Str s) = '$':s
-newtype LitStr = LitStr String deriving(Eq, Ord)
-instance Show LitStr where show (LitStr s) = s
+newtype DollarString = DollarString String deriving(Eq, Ord)
+instance Show DollarString where show (DollarString s) = '$':s
+
+newtype DirectString = DirectString String deriving(Eq, Ord)
+instance Show DirectString where show (DirectString s) = s
 
 data MachineInst =
   LabelMI String | CommentMI String | StringMI String
-  | MovMI_RR Reg Reg | MovMI_OR Op Reg | MovMI_RO Reg Op | MovMI_IO Str Op
-  | MovMI_IR Str Reg
+  | MovMI_RR Reg Reg | MovMI_OR Op Reg | MovMI_RO Reg Op
+  | MovMI_IO DollarString Op | MovMI_IR DollarString Reg
   | CmpMI_RR Reg Reg | CmpMI_OR Op Reg
   | AddMI_RR Reg Reg | AddMI_OR Op Reg | SubMI_RR Reg Reg | SubMI_OR Op Reg
   | IMulMI_RR Reg Reg | IMulMI_OR Op Reg | DivMI_R Reg      | DivMI_O Op
@@ -110,7 +110,7 @@ data MachineInst =
   | XorMI_RR Reg Reg | XorMI_OR Op Reg | LShMI_RR Reg Reg | LShMI_OR Op Reg
   | RShMI_RR Reg Reg | RShMI_OR Op Reg
   | CJumpMI C String | JumpMI String
-  | CallMI_I LitStr | CallMI_R Reg | RetMI
+  | CallMI_I DirectString | CallMI_R Reg | RetMI
   | PushMI_I Reg | PushMI_R Reg | PopMI_R Reg
   | Unimplemented String
   deriving(Eq, Ord)
@@ -141,7 +141,7 @@ lirNodeToMachineInst' _ _ (StoreWordLN symAddr (VarR reg)) = return [
   MovMI_RO reg (lowerSymAddress symAddr)]
 
 lirNodeToMachineInst' aL _ (StoreWordLN symAddr (LitR cValue)) = return [
-  MovMI_IO (Str $ constToString aL cValue) (lowerSymAddress symAddr)]
+  MovMI_IO (DollarString $ constToString aL cValue) (lowerSymAddress symAddr)]
 
 lirNodeToMachineInst' aL _ (CmpWordLN (LitR c) v) = return [
   CmpMI_OR (lowerConstant aL c) v]
@@ -203,7 +203,7 @@ lirNodeToMachineInst' _ rI (CallRuntimeLN (AllocStructFn structId) result) =
         let functionName (ClsrST _) = "call_rt_alloc_base_node"
             functionName ClsrAppNodeST = "call_rt_alloc_app_node"
         in [ LabelMI (show notEnoughSpace) ] ++ pushLiveRegs ++
-           [ CallMI_I $ LitStr $ functionName structId] ++
+           [ CallMI_I $ DirectString $ functionName structId] ++
            popLiveRegs ++ [ MovMI_RR Reg_RAX result ]
 
       pushLiveRegs = map PushMI_R liveRegs
@@ -218,14 +218,14 @@ lirNodeToMachineInst' _ rI (CallRuntimeLN (ForceFn value) result) =
 
     callRT = [
       MovMI_RR value regArgPtr,
-      CallMI_I $ LitStr "runtime_force",
+      CallMI_I $ DirectString "runtime_force",
       MovMI_RR Reg_RAX result ]
 
 lirNodeToMachineInst' _ _ (PanicLN panicString) = do
   stringLabel <- Hoopl.freshLabel
   return [
-    MovMI_IR (Str $ show stringLabel) Reg_RDI,
-    CallMI_I $ LitStr "runtime_panic",
+    MovMI_IR (DollarString $ show stringLabel) Reg_RDI,
+    CallMI_I $ DirectString "runtime_panic",
     LabelMI $ show stringLabel,
     StringMI panicString
     ]
