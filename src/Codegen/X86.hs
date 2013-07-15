@@ -176,10 +176,8 @@ lirNodeToMachineInst' aL gcRegs (BinOpLN op a b r) = do
         injFor_OR LShiftLOp = LShMI_OR
         injFor_OR RShiftLOp = RShMI_OR
 
-lirNodeToMachineInst' _ _ Phi2LN{} = return [
-  -- TODO: change this to an 'error' once we have a proper compilation
-  -- pipeline
-  Unimplemented "phi nodes should have been removed by now" ]
+lirNodeToMachineInst' _ _ Phi2LN{} =
+  error "logic error: phi nodes should have been removed by now!"
 
 lirNodeToMachineInst' _ rI (CallRuntimeLN (AllocStructFn structId) result) =
   let (regA:_) = filter (/= result) $ riFreeRegs rI in do
