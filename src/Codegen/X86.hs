@@ -199,14 +199,11 @@ lirNodeToMachineInst' _ rI (CallRuntimeLN (AllocStructFn structId) result) =
         JumpMI (show allocationDone) ]
 
       slowPath notEnoughSpace =
-        [ LabelMI (show notEnoughSpace) ] ++ pushLiveRegs ++
-        [ PushMI_R Reg_RDI ] ++
-        [ MovMI_RR Reg_R15 Reg_RDI ] ++
-        [ CallMI_I (LitStr $ "runtime_allocate_" ++
-                    case structId of (ClsrST _) -> "closure"
-                                     ClsrAppNodeST -> "app_node") ] ++
-        [ PopMI_R Reg_RDI ] ++
-        popLiveRegs ++ [ MovMI_RR Reg_RAX result ]
+        let functionName (ClsrST _) = "call_rt_alloc_base_node"
+            functionName ClsrAppNodeST = "call_rt_alloc_app_node"
+        in [ LabelMI (show notEnoughSpace) ] ++ pushLiveRegs ++
+           [ CallMI_I $ LitStr $ functionName structId] ++
+           popLiveRegs ++ [ MovMI_RR Reg_RAX result ]
 
       pushLiveRegs = map PushMI_R liveRegs
       popLiveRegs = reverse $ map PopMI_R liveRegs

@@ -37,7 +37,7 @@ static void *expand_and_allocate(globals_t *globals, size_t size) {
   return (void *) memory;
 }
 
-clsr_base_node_t *runtime_allocate_closure(globals_t *globals) {
+clsr_base_node_t *runtime_allocate_base_node(globals_t *globals) {
   return expand_and_allocate(globals, sizeof(clsr_base_node_t));
 }
 

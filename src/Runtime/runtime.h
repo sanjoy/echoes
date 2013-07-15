@@ -72,7 +72,7 @@ static clsr_app_node_t *value_to_app_node(value_t value) {
   return (clsr_app_node_t *) (value & ~3);
 }
 
-clsr_base_node_t *runtime_allocate_closure(globals_t *);
+clsr_base_node_t *runtime_allocate_base_node(globals_t *);
 clsr_app_node_t *runtime_allocate_app_node(globals_t *);
 value_t runtime_force(clsr_app_node_t *);
 

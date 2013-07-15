@@ -1,4 +1,4 @@
-	.globl	epoch
+	.globl	epoch, call_rt_alloc_app_node, call_rt_alloc_base_node
 	.type	epoch, @function
 
 epoch:
@@ -33,4 +33,26 @@ epoch:
 	pop %rbx
 	pop %rbp
 
+	retq
+
+	.type	call_rt_alloc_base_node, @function
+
+call_rt_alloc_base_node:
+	/* runtime_allocate_* expects the VMGlobals struct as first
+	   argument. */
+	pushq %rdi
+	movq %r15, %rdi
+	callq runtime_allocate_base_node
+	popq %rdi
+	retq
+
+	.type	call_rt_alloc_app_node, @function
+
+call_rt_alloc_app_node:
+	/* runtime_allocate_* expects the VMGlobals struct as first
+	   argument. */
+	pushq %rdi
+	movq %r15, %rdi
+	callq runtime_allocate_app_node
+	popq %rdi
 	retq
