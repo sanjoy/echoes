@@ -14,7 +14,7 @@ import LIR.LIR
 import Codegen.Codegen
 import Utils.Common
 
-data Args = Args {
+data Echoes = Echoes {
   debug :: Bool,
   annotate_Assembly :: Bool,
   fuel :: Int,
@@ -22,14 +22,15 @@ data Args = Args {
   output :: FilePath
   } deriving(Show, Data, Typeable)
 
-defaultArgs :: Args
-defaultArgs = Args {
+defaultArgs :: Echoes
+defaultArgs = Echoes {
   debug = False &= help "print debug information",
   annotate_Assembly = False &= help "annotate generated assembly with comments",
   fuel  = maxBound &= help "optimization fuel",
   input = def &= typFile &= help "input file (leave blank for stdin)",
   output = def &= typFile &= help "output file (leave blank for stdout)"
-  }
+  } &= help "Compiling lambda calculus" &=
+       summary "Echoes v0.0.1, (C) Sanjoy Das"
 
 main :: IO ()
 main = do
