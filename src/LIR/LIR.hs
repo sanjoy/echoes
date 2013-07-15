@@ -287,7 +287,7 @@ hirToLIR hFn = do
           BinOpLN BitOrLOp (LitR ClsrNodeTagC) (VarR freshNode) newNode ]
 
     checkPushValid var = do
-      panicLbl <- getPanicLabel "too many pushes!"
+      panicLbl <- getPanicLabel "too many pushes"
       (appsLeft, untaggedVar) <- twice freshVarName
       pushOkay <- freshLabel
       return (mkMiddles [
@@ -339,7 +339,7 @@ hirToLIR hFn = do
     genDivision :: Rator Constant -> Rator Constant -> SSAVar ->
                    IRMonad PanicMap (Graph LNode O O)
     genDivision _ (LitR (WordC 0)) _ = do
-      divisorIsZero <- getPanicLabel "division by zero!"
+      divisorIsZero <- getPanicLabel "encountered division by zero"
       neverReached <- freshLabel
       return $ mkLast (JumpLN divisorIsZero) |*><*|
         mkFirst (LabelLN neverReached)
@@ -350,7 +350,7 @@ hirToLIR hFn = do
       return $ mkMiddle (CopyWordLN (LitR inB) tmpB) <*> divOp
 
     genDivision inA (VarR inB) result = do
-      divisorIsZero <- getPanicLabel "division by zero!"
+      divisorIsZero <- getPanicLabel "encountered division by zero"
       divisorIsNotZero <- freshLabel
       resultUnshifted <- freshVarName
       let zeroCheck = mkMiddle (CmpWordLN (LitR (WordC 0)) inB) <*>
@@ -387,7 +387,7 @@ hirToLIR hFn = do
             tagToType IntTagC = "integer"
             tagToType BoolTagC = "boolean"
             tagToType t = error $ "tag " ++ show t ++ " unexpected"
-        panicLbl <- getPanicLabel $ "Invalid type: expected `" ++
+        panicLbl <- getPanicLabel $ "invalid type, expected `" ++
                     tagToType tag ++ "`"
         checkPassed <- freshLabel
         return $ mkMiddles [
