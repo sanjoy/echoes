@@ -60,7 +60,7 @@ lirToMachineCode opts argCounts (LFunction _ _ entry graph) = do
   let blockList = postorder_dfs_from lMap entry
   allCode <- mapM showBlock blockList
   let flatCode = concat allCode
-  return $ prologue stackSize ++ map show flatCode
+  return $ prologue stackSize ++ (map show $ peepholeOpt flatCode)
   where
     prologue stackSize = map show $ machinePrologue stackSize
     mConcatMap f list = liftM concat $ mapM f list

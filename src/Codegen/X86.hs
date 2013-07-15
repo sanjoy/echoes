@@ -3,7 +3,7 @@
 
 module Codegen.X86(Reg, regStackPtr, regBasePtr, regArgPtr, generalRegSet,
                    MachineInst, lirNodeToMachineInst, machinePrologue,
-                   wordSize, asmHeader)
+                   wordSize, asmHeader, peepholeOpt)
        where
 
 import qualified Compiler.Hoopl as Hoopl
@@ -244,6 +244,13 @@ machinePrologue stackSize = map PushMI_R calleeSavedRegs ++ [
   MovMI_RR regStackPtr regBasePtr,
   let roundedUpStackSize = ((stackSize + 15) `div` 16) * 16
   in SubMI_OR (LitWordOp $ show roundedUpStackSize) regStackPtr ]
+
+peepholeOpt :: [MachineInst] -> [MachineInst]
+peepholeOpt (MovMI_RR a b:rest)
+  | a == b = peepholeOpt rest
+  | otherwise = MovMI_RR a b:peepholeOpt rest
+peepholeOpt (i:is) = i:peepholeOpt is
+peepholeOpt [] = []
 
 jCondToC :: JCondition -> C
 jCondToC JE = E
