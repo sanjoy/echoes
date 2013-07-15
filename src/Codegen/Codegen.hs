@@ -52,8 +52,9 @@ eliminatePhi graph =
       doNothingCO = return . mkFirst
       doNothingOC = return . mkLast
 
-lirToMachineCode :: (ClsrId -> Int) -> LFunction SSAVar -> M [String]
-lirToMachineCode argCounts (LFunction _ _ entry graph) = do
+lirToMachineCode :: EchoesOptions -> (ClsrId -> Int) -> LFunction SSAVar ->
+                    M [String]
+lirToMachineCode opts argCounts (LFunction _ _ entry graph) = do
   graphWithoutPhis <- eliminatePhi graph
   (GMany NothingO lMap NothingO, stackSize) <- nullRegAlloc graphWithoutPhis
   let blockList = postorder_dfs_from lMap entry
@@ -71,18 +72,21 @@ lirToMachineCode argCounts (LFunction _ _ entry graph) = do
             = blockToNodeList block
       in rNodeToMI argCounts lbl `mApp`
          mConcatMap (rNodeToMI argCounts) inner `mApp` rNodeToMI argCounts jmp
-      where rNodeToMI aC (RegInfNode rI node) = lirNodeToMachineInst aC rI node
+      where
+        rNodeToMI :: (ClsrId -> Int) -> RegInfNode RgLNode e x ->
+                     M [MachineInst]
+        rNodeToMI aC (RegInfNode rI node) = lirNodeToMachineInst opts aC rI node
 
-lirCodegen :: [LFunction SSAVar] -> M String
-lirCodegen fnList =
+lirCodegen :: EchoesOptions -> [LFunction SSAVar] -> M String
+lirCodegen opts fnList =
   let fnInfoMap = M.fromList $ map (\(LFunction n aC _ _) -> (n, aC)) fnList
       fnInfo = Mby.fromJust . flip M.lookup fnInfoMap
   in liftM ((asmHeader ++). unlines . concat) $
      mapM (toMachineCode fnInfo) fnList
   where toMachineCode fnInfo lFn = do
-          code <- lirToMachineCode fnInfo lFn
+          code <- lirToMachineCode opts fnInfo lFn
           return $ ("closure_body_" ++ show (lFnName lFn) ++ ":"):code ++ [""]
 
-lirDebugCodegen :: M [LFunction SSAVar] -> String
-lirDebugCodegen mFnList =
-  runSimpleUniqueMonad $ runWithFuel maxBound (mFnList >>= lirCodegen)
+lirDebugCodegen :: EchoesOptions -> M [LFunction SSAVar] -> String
+lirDebugCodegen opts mFnList =
+  runSimpleUniqueMonad $ runWithFuel maxBound (mFnList >>= lirCodegen opts)

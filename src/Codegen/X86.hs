@@ -115,12 +115,11 @@ data MachineInst =
 
 deriving instance Show(GenLNode Reg e x)
 
--- TODO: make this optional
-lirNodeToMachineInst :: (ClsrId -> Int) -> RegInfo Reg -> GenLNode Reg e x ->
-                        M [MachineInst]
-lirNodeToMachineInst clsrMap reg node = do
+lirNodeToMachineInst :: EchoesOptions -> (ClsrId -> Int) -> RegInfo Reg ->
+                        GenLNode Reg e x -> M [MachineInst]
+lirNodeToMachineInst opts clsrMap reg node = do
   code <- lirNodeToMachineInst' clsrMap reg node
-  return ((CommentMI $ show node):code)
+  return $ if annotateAssembly opts then (CommentMI $ show node):code else code
 
 lirNodeToMachineInst' :: (ClsrId -> Int) -> RegInfo Reg -> GenLNode Reg e x ->
                          M [MachineInst]

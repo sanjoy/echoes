@@ -12,9 +12,11 @@ import HIR.HIR
 import HIR.Optimizations
 import LIR.LIR
 import Codegen.Codegen
+import Utils.Common
 
 data Args = Args {
   debug :: Bool,
+  annotate_Assembly :: Bool,
   fuel :: Int,
   input :: FilePath,
   output :: FilePath
@@ -23,6 +25,7 @@ data Args = Args {
 defaultArgs :: Args
 defaultArgs = Args {
   debug = False &= help "print debug information",
+  annotate_Assembly = False &= help "annotate generated assembly with comments",
   fuel  = maxBound &= help "optimization fuel",
   input = def &= typFile &= help "input file (leave blank for stdin)",
   output = def &= typFile &= help "output file (leave blank for stdout)"
@@ -31,6 +34,7 @@ defaultArgs = Args {
 main :: IO ()
 main = do
   parsedArgs <- cmdArgs defaultArgs
+  let eOpts = EOptions { annotateAssembly = annotate_Assembly parsedArgs }
   let (inpSrc, fileN) = createSource $ input parsedArgs
       outSink = createSink $ output parsedArgs
       isDebug = debug parsedArgs
@@ -46,8 +50,8 @@ main = do
         debugShow isDebug (hirDebugShowGraph optimizedHIR) "Optimized HIR"
         let lir = optimizedHIR >>= mapM hirToLIR
         debugShow isDebug (lirDebugShowGraph lir) "Unoptimized LIR"
-        when isDebug $ putStrLn $ lirDebugCodegen lir
-        let mcode = lir >>= lirCodegen
+        when isDebug $ putStrLn $ lirDebugCodegen eOpts lir
+        let mcode = lir >>= lirCodegen eOpts
             code = runSimpleUniqueMonad $ runWithFuel initialFuel mcode
         outSink code
   where
