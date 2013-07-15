@@ -93,14 +93,16 @@ data Op = MemOp1 Reg | MemOp2 Reg Int | MemOp3 Reg Reg | LitWordOp String
 
 data C = E | G | L | NE deriving(Eq, Ord)
 
+-- TODO: Rename Str and LitStr
 newtype Str = Str String deriving(Eq, Ord)
 instance Show Str where show (Str s) = '$':s
 newtype LitStr = LitStr String deriving(Eq, Ord)
 instance Show LitStr where show (LitStr s) = s
 
 data MachineInst =
-  LabelMI String | CommentMI String
+  LabelMI String | CommentMI String | StringMI String
   | MovMI_RR Reg Reg | MovMI_OR Op Reg | MovMI_RO Reg Op | MovMI_IO Str Op
+  | MovMI_IR Str Reg
   | CmpMI_RR Reg Reg | CmpMI_OR Op Reg
   | AddMI_RR Reg Reg | AddMI_OR Op Reg | SubMI_RR Reg Reg | SubMI_OR Op Reg
   | IMulMI_RR Reg Reg | IMulMI_OR Op Reg | DivMI_R Reg      | DivMI_O Op
@@ -219,9 +221,14 @@ lirNodeToMachineInst' _ rI (CallRuntimeLN (ForceFn value) result) =
       CallMI_I $ LitStr "runtime_force",
       MovMI_RR Reg_RAX result ]
 
-lirNodeToMachineInst' _ _ (PanicLN str) = return [
-  CommentMI str,
-  CallMI_I $ LitStr "runtime_panic" ]
+lirNodeToMachineInst' _ _ (PanicLN panicString) = do
+  stringLabel <- Hoopl.freshLabel
+  return [
+    MovMI_IR (Str $ show stringLabel) Reg_RDI,
+    CallMI_I $ LitStr "runtime_panic",
+    LabelMI $ show stringLabel,
+    StringMI panicString
+    ]
 
 lirNodeToMachineInst' _ _ (CJumpLN c tL fL) = return [
   CJumpMI (jCondToC c) (show tL),
@@ -291,12 +298,14 @@ instance Show C where
 showMInst :: MachineInst -> String
 showMInst mInst = case mInst of
   LabelMI lbl -> lbl ++ ":"
+  StringMI str -> ".string " ++ escapeString str
   CommentMI str -> "/** " ++ str ++ " **/"
 
   MovMI_RR r1 r2 -> movq r1 r2
   MovMI_OR op r -> movq op r
   MovMI_RO r op -> movq r op
   MovMI_IO i op -> movq i op
+  MovMI_IR i r  -> movq i r
 
   CmpMI_RR r1 r2 -> cmpq r1 r2
   CmpMI_OR op r -> cmpq op r
@@ -352,6 +361,8 @@ showMInst mInst = case mInst of
     popq a   = "popq " ++ show a
     j c lbl  = "j" ++ show c ++ " " ++ lbl
     jmp lbl = "jmp " ++ lbl
+    -- TODO: escape quotes etc.
+    escapeString s = "\"" ++ s ++ "\""
 
 instance Show MachineInst where
   show lbl@(LabelMI _) = showMInst lbl

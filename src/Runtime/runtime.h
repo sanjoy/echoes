@@ -78,8 +78,7 @@ value_t runtime_force(clsr_app_node_t *);
 
 void value_print(value_t, FILE *);
 
-void runtime_panic(void);
-void runtime_panic_str(const char *string);
+void runtime_panic(const char *string);
 
 value_t epoch(globals_t *);
 

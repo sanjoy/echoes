@@ -99,11 +99,7 @@ void value_print(value_t value, FILE *fptr) {
   }
 }
 
-void runtime_panic(void) {
-  runtime_panic_str("panic!");
-}
-
-void runtime_panic_str(const char *string) {
+void runtime_panic(const char *string) {
   fprintf(stderr, "internal error: %s\n", string);
   abort();
 }
