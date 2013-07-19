@@ -21,17 +21,17 @@ pTerm = try pSym <|> try pIntLit <|> try pBoolLit <|> try pAbs <|>
         pIntLit = liftM (IntT . read) $ many1 digit
         pBoolLit = liftM BoolT $ choice [try (string "true") >> return True,
                                          try (string "false") >> return False]
-        pAbs = between open close $ do
+        pAbs = inParens $ do
           _ <- string "lam"
           spaces
-          args <- between open close $ sepBy1 variable spaces
+          args <- inParens $  sepBy1 variable spaces
           spaces
           body <- pTerm
           return $ AbsT args body
-        pApp = between open close $ do
+        pApp = inParens $ do
           (left, right) <- parseDouble
           return $ AppT left right
-        pIfThenElse = between open close $ do
+        pIfThenElse = inParens $ do
           _ <- string "if"
           spaces
           condition <- pTerm
@@ -40,19 +40,19 @@ pTerm = try pSym <|> try pIntLit <|> try pBoolLit <|> try pAbs <|>
           spaces
           false <- pTerm
           return $ IfT condition true false
-        pBinOp = between open close $ do
+        pBinOp = inParens $ do
           opType <- choice operatorParsers
           spaces
           (left, right) <- parseDouble
           return $ BinT opType left right
-        pLet = between open close $ do
+        pLet = inParens $ do
           _ <- string "let"
           spaces
-          bindings <- between open close $ sepBy1 pLetBinding spaces
+          bindings <- inParens $ sepBy1 pLetBinding spaces
           spaces
           body <- pTerm
           return $ LetT bindings body
-        pLetBinding = between open close $ do
+        pLetBinding = inParens $ do
           var <- variable
           spaces
           boundTo <- pTerm
@@ -67,8 +67,7 @@ pTerm = try pSym <|> try pIntLit <|> try pBoolLit <|> try pAbs <|>
           name <- many1 letter
           if name `elem` keywords then fail "keyword used as variable name"
             else return name
-        open = string "("
-        close = string ")"
+        inParens = between (string "(") (string ")")
         keywords = ["lam", "if", "true", "false"]
         operatorTable = [("+", PlusOp), ("-", MinusOp), ("*", MultOp),
                          ("/", DivOp), ("<", LtOp), ("==", EqOp)]
