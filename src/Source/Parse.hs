@@ -16,7 +16,7 @@ parseString fileName text = case parse pTerm fileName text of
 
 pTerm :: Parser Term
 pTerm = try pSym <|> try pIntLit <|> try pBoolLit <|> try pAbs <|>
-        try pApp <|> try pIfThenElse <|> try pBinOp
+        try pApp <|> try pIfThenElse <|> try pBinOp <|> try pLet
   where pSym = liftM SymT variable
         pIntLit = liftM (IntT . read) $ many1 digit
         pBoolLit = liftM BoolT $ choice [try (string "true") >> return True,
@@ -45,6 +45,18 @@ pTerm = try pSym <|> try pIntLit <|> try pBoolLit <|> try pAbs <|>
           spaces
           (left, right) <- parseDouble
           return $ BinT opType left right
+        pLet = between open close $ do
+          _ <- string "let"
+          spaces
+          bindings <- between open close $ sepBy1 pLetBinding spaces
+          spaces
+          body <- pTerm
+          return $ LetT bindings body
+        pLetBinding = between open close $ do
+          var <- variable
+          spaces
+          boundTo <- pTerm
+          return $ (var, boundTo)
 
         parseDouble = do
           left <- pTerm

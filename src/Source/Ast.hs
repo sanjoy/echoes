@@ -14,6 +14,7 @@ instance Show BinOp where
 type Id = String
 data Term = SymT Id | IntT Int | BoolT Bool | AbsT [Id] Term
           | AppT Term Term | IfT Term Term Term | BinT BinOp Term Term
+          | LetT [(Id, Term)] Term
           deriving(Ord, Eq)
 
 maybeAddParens :: Bool -> String -> String
@@ -37,5 +38,13 @@ termToString parens (IfT c t f) =
 termToString parens (BinT op left right) =
   maybeAddParens parens (termToString True left ++ " " ++ show op ++
                          " " ++ termToString True right)
+termToString parens (LetT bindings body) =
+  maybeAddParens parens thisTerm
+  where
+    thisTerm =
+      unlines $ ["let "] ++ map showBindings bindings ++
+      ["in ", "  " ++ termToString False body]
+    showBindings (varId, boundTo) =
+      "  " ++ varId ++ " = " ++ termToString False boundTo
 
 instance Show Term where show = termToString False
