@@ -18,7 +18,7 @@ cabal-version:       >=1.8
 
 executable echoes
   main-is: Main.hs
-  build-depends:       base ==4.5.*, hoopl ==3.8.*, containers ==0.4.*,
+  build-depends:       base ==4.6.*, hoopl ==3.8.*, containers ==0.5.*,
                        mtl ==2.1.*, parsec ==3.1.*, bitset ==1.4.*,
                        cmdargs ==0.10.*
 

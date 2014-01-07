@@ -25,7 +25,7 @@ riAddFreeReg' = flip (S.foldl (flip riAddFreeReg))
 riRemoveFreeReg :: (Enum a) => a -> RegInfo a -> RegInfo a
 riRemoveFreeReg a (gcRegs, freeRegs) = (gcRegs, a `BS.delete` freeRegs)
 
-riFreeRegs :: RegInfo a -> [a]
+riFreeRegs :: (Enum a) => RegInfo a -> [a]
 riFreeRegs = BS.toList . snd
 
 riNonFreeRegsIn :: (Enum a) => RegInfo a -> [a] -> [a]
