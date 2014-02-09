@@ -3,7 +3,8 @@
 
 module Utils.Common(M, ClsrId, SSAVar, Rator, GenRator(..), mapGenRator,
                     ratorSubstitute, IRMonad, freshVarName, runIRMonad,
-                    irGetCustom, irPutCustom, mApp, EchoesOptions(..))
+                    irGetCustom, irPutCustom, mApp, EchoesOptions(..),
+                    unimplemented)
        where
 
 import Compiler.Hoopl
@@ -48,3 +49,5 @@ mApp = liftM2 (++)
 data EchoesOptions = EOptions {
   annotateAssembly :: Bool }
 
+unimplemented :: String -> a
+unimplemented str = error ("unimplemented: " ++ str)

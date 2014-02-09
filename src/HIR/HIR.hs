@@ -28,6 +28,7 @@ getOpenVariables env (IfT c t f) =
   S.unions $ map (getOpenVariables env) [c, t, f]
 getOpenVariables env (BinT _ l r) =
   S.unions $ map (getOpenVariables env) [l, r]
+getOpenVariables _ (LetT _ _) = unimplemented "let expressions"
 
 isClosed :: Term -> Bool
 isClosed = S.null . getOpenVariables S.empty
@@ -51,6 +52,7 @@ openLambdas (IfT cond true false) =
   IfT (openLambdas cond) (openLambdas true) (openLambdas false)
 openLambdas (BinT op left right) =
   BinT op (openLambdas left) (openLambdas right)
+openLambdas (LetT _ _) = unimplemented "let expressions"
 
 
 {- After the openLambdas phase, we "lift" the lambda bodies out of their
@@ -90,6 +92,7 @@ liftTerm = liftWithEnv M.empty
       liftedLeft <- liftWithEnv env left
       liftedRight <- liftWithEnv env right
       return $ BinLT op liftedLeft liftedRight
+    liftWithEnv _ (LetT _ _) = unimplemented "let expressions"
 
     createFunction :: Int -> LiftedTerm -> LiftM ClsrId
     createFunction argC body = do
