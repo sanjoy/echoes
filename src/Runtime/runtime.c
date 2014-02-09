@@ -91,10 +91,16 @@ void value_print(value_t value, FILE *fptr) {
       fprintf(fptr, "bool(%s)", (value >> 2) ? "true" : "false");
       break;
     case kTypeClsrBase:
-      fprintf(fptr, "closure-base(%d)", value_to_base_node(value)->arg_count);
+      fprintf(fptr, "closure-base(%d)",
+              (int) value_to_base_node(value)->arg_count);
       break;
     case kTypeClsrApp:
-      fprintf(fptr, "closure-app(%d)", value_to_app_node(value)->args_left);
+      fprintf(fptr, "closure-app(%d)",
+              (int) value_to_app_node(value)->args_left);
+      break;
+    default:
+      fprintf(fptr, "unexpected type (%d)!\n", value_get_type(value));
+      abort();
       break;
   }
 }

@@ -1,7 +1,13 @@
-	.globl	epoch, call_rt_alloc_app_node, call_rt_alloc_base_node
+	.globl	_epoch, _call_rt_alloc_app_node, _call_rt_alloc_base_node
+#ifndef __clang__
 	.type	epoch, @function
+#endif
 
+#ifdef __clang__
+_epoch:
+#else
 epoch:
+#endif
 	push %rbp
 	push %rbx
 	push %rcx
@@ -35,24 +41,36 @@ epoch:
 
 	retq
 
+#ifndef __clang__
 	.type	call_rt_alloc_base_node, @function
+#endif
 
+#ifdef __clang__
+_call_rt_alloc_base_node:
+#else
 call_rt_alloc_base_node:
+#endif
 	/* runtime_allocate_* expects the VMGlobals struct as first
 	   argument. */
 	pushq %rdi
 	movq %r15, %rdi
-	callq runtime_allocate_base_node
+	callq _runtime_allocate_base_node
 	popq %rdi
 	retq
 
+#ifndef __clang__
 	.type	call_rt_alloc_app_node, @function
+#endif
 
+#ifdef __clang__
+_call_rt_alloc_app_node:
+#else
 call_rt_alloc_app_node:
+#endif
 	/* runtime_allocate_* expects the VMGlobals struct as first
 	   argument. */
 	pushq %rdi
 	movq %r15, %rdi
-	callq runtime_allocate_app_node
+	callq _runtime_allocate_app_node
 	popq %rdi
 	retq

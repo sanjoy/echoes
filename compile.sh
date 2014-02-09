@@ -1,4 +1,4 @@
-#!/usr/bin/zsh
+#!/bin/bash
 
 KEEP_INTERMEDIATES="no"
 GCC_OPT_LEVEL="-O0"
@@ -25,11 +25,14 @@ else
     OUTPUT=$2
 fi
 
-~/src/echoes/dist/build/echoes/echoes --input=${1} --output ${OUTPUT}.S
-gcc -g3 ${GCC_OPT_LEVEL} ${OUTPUT}.S src/Runtime/runtime-x86.S \
-    src/Runtime/runtime.c -o ${OUTPUT}
+ROOT=`dirname \`pwd\``
+
+echo "Intermediate output in ${OUTPUT}.S"
+
+$ROOT/dist/build/echoes/echoes --input=${1} --output=${OUTPUT}.S
+gcc -g3 ${GCC_OPT_LEVEL} ${OUTPUT}.S $ROOT/src/Runtime/runtime.c \
+    $ROOT/src/Runtime/runtime-x86.S -o ${OUTPUT}
 
 if [[ "$KEEP_INTERMEDIATES" == "no" ]]; then
     rm -r ${OUTPUT}.S
 fi
-

@@ -41,7 +41,9 @@ vmGCLim = 16
 asmHeader :: String
 asmHeader = unlines [
   "\t.globl\tclosure_body_0",
+  "#ifndef __clang__",
   "\t.type\tclosure_body_0,\t@function",
+  "#endif",
   ""]
 
 wordSize :: Int
@@ -56,12 +58,15 @@ getLiveCallerSavedRegs :: RegInfo Reg -> [Reg]
 getLiveCallerSavedRegs rI = riNonFreeRegsIn rI calleeSavedRegs
 
 lowerConstant :: (ClsrId -> Int) -> Constant -> Op
-lowerConstant appLimits = LitWordOp . constToString appLimits
+lowerConstant _ (ClsrCodePtrC clsrId) =
+  SymWordOp $ DirectString $ "closure_body_" ++ show clsrId
+lowerConstant appLimits op =
+  LitWordOp $ DollarString $ constToString appLimits op
 
 constToString :: (ClsrId -> Int) -> Constant -> String
 constToString _ (WordC w) = show w
 constToString appLimits (ClsrAppLimitC clsrId) = show (appLimits clsrId)
-constToString _ (ClsrCodePtrC clsrId) = "closure_body_" ++ show clsrId
+constToString _ (ClsrCodePtrC _) = error "not handled here "
 constToString _ ClsrTagC = "1"
 constToString _ ClsrBaseTagC = "3"
 constToString _ ClsrNodeTagC = "1"
@@ -88,8 +93,8 @@ structSize :: StructId -> String
 structSize (ClsrST _) = "16"
 structSize ClsrAppNodeST = "24"
 
-data Op = MemOp1 Reg | MemOp2 Reg Int | MemOp3 Reg Reg | LitWordOp String
-        deriving(Eq, Ord)
+data Op = MemOp1 Reg | MemOp2 Reg Int | MemOp3 Reg Reg | LitWordOp DollarString
+        | SymWordOp DirectString deriving(Eq, Ord)
 
 data C = E | G | L | NE deriving(Eq, Ord)
 
@@ -141,7 +146,8 @@ lirNodeToMachineInst' _ _ (StoreWordLN symAddr (VarR reg)) = return [
   MovMI_RO reg (lowerSymAddress symAddr)]
 
 lirNodeToMachineInst' aL _ (StoreWordLN symAddr (LitR cValue)) = return [
-  MovMI_IO (DollarString $ constToString aL cValue) (lowerSymAddress symAddr)]
+  MovMI_OR (lowerConstant aL cValue) Reg_RAX,
+  MovMI_RO Reg_RAX (lowerSymAddress symAddr) ]
 
 lirNodeToMachineInst' aL _ (CmpWordLN (LitR c) v) = return [
   CmpMI_OR (lowerConstant aL c) v]
@@ -190,7 +196,7 @@ lirNodeToMachineInst' _ rI (CallRuntimeLN (AllocStructFn structId) result) =
     where
       checkGCLimit regA notEnoughSpace = [
         MovMI_OR (MemOp2 vmGlobalsReg vmGCLoc) regA,
-        AddMI_OR (LitWordOp (structSize structId)) regA,
+        AddMI_OR (LitWordOp $ DollarString $ (structSize structId)) regA,
         CmpMI_OR (MemOp2 vmGlobalsReg vmGCLim) regA,
         CJumpMI G (show notEnoughSpace) ]
 
@@ -200,8 +206,8 @@ lirNodeToMachineInst' _ rI (CallRuntimeLN (AllocStructFn structId) result) =
         JumpMI (show allocationDone) ]
 
       slowPath notEnoughSpace =
-        let functionName (ClsrST _) = "call_rt_alloc_base_node"
-            functionName ClsrAppNodeST = "call_rt_alloc_app_node"
+        let functionName (ClsrST _) = "_call_rt_alloc_base_node"
+            functionName ClsrAppNodeST = "_call_rt_alloc_app_node"
         in [ LabelMI (show notEnoughSpace) ] ++ pushLiveRegs ++
            [ CallMI_I $ DirectString $ functionName structId] ++
            popLiveRegs ++ [ MovMI_RR Reg_RAX result ]
@@ -218,14 +224,14 @@ lirNodeToMachineInst' _ rI (CallRuntimeLN (ForceFn value) result) =
 
     callRT = [
       MovMI_RR value regArgPtr,
-      CallMI_I $ DirectString "runtime_force",
+      CallMI_I $ DirectString "_runtime_force",
       MovMI_RR Reg_RAX result ]
 
 lirNodeToMachineInst' _ _ (PanicLN panicString) = do
   stringLabel <- Hoopl.freshLabel
   return [
     MovMI_IR (DollarString $ show stringLabel) Reg_RDI,
-    CallMI_I $ DirectString "runtime_panic",
+    CallMI_I $ DirectString "_runtime_panic",
     LabelMI $ show stringLabel,
     StringMI panicString
     ]
@@ -250,7 +256,7 @@ machinePrologue  :: Int -> [MachineInst]
 machinePrologue stackSize = map PushMI_R calleeSavedRegs ++ [
   MovMI_RR regStackPtr regBasePtr,
   let roundedUpStackSize = ((stackSize + 15) `div` 16) * 16
-  in SubMI_OR (LitWordOp $ show roundedUpStackSize) regStackPtr ]
+  in SubMI_OR (LitWordOp $ DollarString $ show roundedUpStackSize) regStackPtr ]
 
 peepholeOpt :: [MachineInst] -> [MachineInst]
 peepholeOpt (MovMI_RR a b:rest)
@@ -287,7 +293,8 @@ instance Show Op where
   show (MemOp1 reg) = "(" ++ show reg ++ ")"
   show (MemOp2 reg offset) = show offset ++ "(" ++ show reg ++ ")"
   show (MemOp3 reg1 reg2) = show reg1 ++ "(" ++ show reg2 ++ ")"
-  show (LitWordOp lit) = '$':lit
+  show (LitWordOp lit) = show lit
+  show (SymWordOp sym) = show sym
 
 instance Show C where
   show E = "e"
@@ -330,7 +337,7 @@ showMInst mInst = case mInst of
   RShMI_OR  op r  -> shrq op r
   DivMI_O   op    -> divq op
 
-  CallMI_R r      -> call r
+  CallMI_R r      -> "callq *" ++ show r
   CallMI_I i      -> call i
 
   PushMI_R r      -> pushq r
@@ -355,7 +362,7 @@ showMInst mInst = case mInst of
     shlq a b = "shlq " ++ show a ++ ", " ++ show b
     shrq a b = "shrq " ++ show a ++ ", " ++ show b
     divq a   = "divq " ++ show a
-    call a   = "call " ++ show a
+    call a   = "callq " ++ show a
     retq     = "retq "
     pushq a  = "pushq " ++ show a
     popq a   = "popq " ++ show a
