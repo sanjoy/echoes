@@ -5,28 +5,27 @@ module Codegen.Common(RegInfo, riNewRegInfo, riAddGCReg, riAddFreeReg,
                       riNonFreeRegsIn)
        where
 
-import qualified Data.BitSet as BS
 import qualified Data.Set as S
 
-type RegInfo a = (BS.BitSet a, BS.BitSet a)
+type RegInfo a = (S.Set a, S.Set a)
 
-riNewRegInfo :: (Enum a) => RegInfo a
-riNewRegInfo = (BS.empty, BS.empty)
+riNewRegInfo :: (Ord a) => RegInfo a
+riNewRegInfo = (S.empty, S.empty)
 
-riAddGCReg :: (Enum a) => a -> RegInfo a -> RegInfo a
-riAddGCReg a (gcRegs, freeRegs) = (a `BS.insert` gcRegs, freeRegs)
+riAddGCReg :: (Ord a) => a -> RegInfo a -> RegInfo a
+riAddGCReg a (gcRegs, freeRegs) = (a `S.insert` gcRegs, freeRegs)
 
-riAddFreeReg :: (Enum a) => a -> RegInfo a -> RegInfo a
-riAddFreeReg a (gcRegs, freeRegs) = (gcRegs, a `BS.insert` freeRegs)
+riAddFreeReg :: (Ord a) => a -> RegInfo a -> RegInfo a
+riAddFreeReg a (gcRegs, freeRegs) = (gcRegs, a `S.insert` freeRegs)
 
-riAddFreeReg' :: (Enum a) => S.Set a -> RegInfo a -> RegInfo a
+riAddFreeReg' :: (Ord a) => S.Set a -> RegInfo a -> RegInfo a
 riAddFreeReg' = flip (S.foldl (flip riAddFreeReg))
 
-riRemoveFreeReg :: (Enum a) => a -> RegInfo a -> RegInfo a
-riRemoveFreeReg a (gcRegs, freeRegs) = (gcRegs, a `BS.delete` freeRegs)
+riRemoveFreeReg :: (Ord a) => a -> RegInfo a -> RegInfo a
+riRemoveFreeReg a (gcRegs, freeRegs) = (gcRegs, a `S.delete` freeRegs)
 
-riFreeRegs :: (Enum a) =>RegInfo a -> [a]
-riFreeRegs = BS.toList . snd
+riFreeRegs :: (Ord a) => RegInfo a -> [a]
+riFreeRegs = S.toList . snd
 
-riNonFreeRegsIn :: (Enum a) => RegInfo a -> [a] -> [a]
-riNonFreeRegsIn (_, freeBS) = filter (not . flip BS.member freeBS)
+riNonFreeRegsIn :: (Ord a) => RegInfo a -> [a] -> [a]
+riNonFreeRegsIn (_, freeS) = filter (not . flip S.member freeS)

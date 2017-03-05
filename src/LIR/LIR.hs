@@ -118,29 +118,32 @@ mapRTRegs _ (AllocStructFn structId) = AllocStructFn structId
 mapRTRegs f (ForceFn reg) = ForceFn $ f reg
 
 getLVarsRead :: forall r e x. GenLNode r e x -> [r]
-getLVarsRead = fst . getVRW
+getLVarsRead = fst . getLVarsReadWritten
 
 getLVarsWritten :: forall r e x. GenLNode r e x -> [r]
-getLVarsWritten = snd . getVRW
+getLVarsWritten = snd . getLVarsReadWritten
 
-getVRW :: forall r e x. GenLNode r e x -> ([r], [r])
-getVRW node =  case node of
-  (CopyWordLN g r) -> (ratorToReg [g], [r])
+getLVarsReadWritten :: forall r e x. GenLNode r e x -> ([r], [r])
+getLVarsReadWritten node =  case node of
+  (CopyWordLN g r) -> (ratorsToRegs [g], [r])
   (LoadWordLN sAddr r) -> (symAddrToReg sAddr, [r])
-  (StoreWordLN sAddr g) -> (ratorToReg [g] ++ symAddrToReg sAddr, [])
-  (CmpWordLN g r) -> (r:ratorToReg [g], [])
-  (BinOpLN _ g1 g2 r) -> (ratorToReg [g1, g2], [r])
-  (Phi2LN (g1, _) (g2, _) r) -> (ratorToReg [g1, g2], [r])
+  (StoreWordLN sAddr g) -> (ratorsToRegs [g] ++ symAddrToReg sAddr, [])
+  (CmpWordLN g r) -> (r:ratorsToRegs [g], [])
+  (BinOpLN _ g1 g2 r) -> (ratorsToRegs [g1, g2], [r])
+  (Phi2LN (g1, _) (g2, _) r) -> (ratorsToRegs [g1, g2], [r])
   (CallRuntimeLN (ForceFn reg) r) -> ([reg], [r])
   (CallRuntimeLN (AllocStructFn _) r) -> ([], [r])
-  (ReturnLN g) -> (ratorToReg [g], [])
+  (ReturnLN g) -> (ratorsToRegs [g], [])
   _ -> ([], [])
-  where ratorToReg = concatMap (\rator -> case rator of
-                                   (VarR reg) -> [reg]
-                                   _ -> [])
-        symAddrToReg (VarPlusVarSA r1 r2) = [r1, r2]
-        symAddrToReg (VarPlusSymSA r _) = [r]
-        symAddrToReg _ = []
+  where
+    ratorsToRegs :: [GenRator r Constant] -> [r]
+    ratorsToRegs rators =
+        concatMap (\rator -> case rator of
+                               (VarR reg) -> [reg]
+                               _ -> []) rators
+    symAddrToReg (VarPlusVarSA r1 r2) = [r1, r2]
+    symAddrToReg (VarPlusSymSA r _) = [r]
+    symAddrToReg _ = []
 
 instance NonLocal (GenLNode r) where
   entryLabel (LabelLN label) = label
@@ -176,7 +179,7 @@ hirToLIR hFn = do
 
     nodeMapFn (LoadLitHN lit out) = do
       (code, value) <- litToConstant lit
-      return $ code <*> mkMiddle (CopyWordLN value out)
+      return $ code Compiler.Hoopl.<*> mkMiddle (CopyWordLN value out)
 
     nodeMapFn (BinOpHN op inA inB out) =
       let genAssertTagI (VarR var) = genAssertTag (VarR var) IntTagC
@@ -191,25 +194,25 @@ hirToLIR hFn = do
           LtOp -> genCmp LtOp inA' inB' out
           EqOp -> genCmp EqOp inA' inB' out
           _ -> genAddSubOp op inA' inB' out
-        return $ assertLeft <*> assertRight <*> actualOp
+        return $ assertLeft Compiler.Hoopl.<*> assertRight Compiler.Hoopl.<*> actualOp
 
     nodeMapFn (Phi2HN (inA, lblA) (inB, lblB) out) = do
       [(codeA', inA'), (codeB', inB')] <- mapM ratorLitToConstant [inA, inB]
-      return $ codeA' <*> codeB' <*>
+      return $ codeA' Compiler.Hoopl.<*> codeB' Compiler.Hoopl.<*>
         mkMiddle (Phi2LN (inA', lblA) (inB', lblB) out)
 
     nodeMapFn (PushHN (VarR clsrVar) value out) = do
       assertT <- genAssertTag (VarR clsrVar) ClsrTagC
       (code', value') <- ratorLitToConstant value
       actualPush <- genPush clsrVar value' out
-      return $ assertT <*> code' <*> actualPush
+      return $ assertT Compiler.Hoopl.<*> code' Compiler.Hoopl.<*> actualPush
 
     nodeMapFn (PushHN (LitR clsrLit) value out) = do
       clsrVar <- freshVarName
       creationCode <- genCreateClosure clsrLit clsrVar
       (code', value') <- ratorLitToConstant value
       actualPush <- genPush clsrVar value' out
-      return $ creationCode <*> code' <*> actualPush
+      return $ creationCode Compiler.Hoopl.<*> code' Compiler.Hoopl.<*> actualPush
 
     nodeMapFn (ForceHN (VarR value) result) = do
       (checkClosureL, forcingNotNeededL) <- twice freshLabel
@@ -221,29 +224,29 @@ hirToLIR hFn = do
 
       let theBeginB = mkLast (JumpLN incomingL)
       let incomingB =
-            mkFirst (LabelLN incomingL) <*> mkLast (JumpLN checkClosureL)
+            mkFirst (LabelLN incomingL) Compiler.Hoopl.<*> mkLast (JumpLN checkClosureL)
       let checkClosureB =
-            mkFirst (LabelLN checkClosureL) <*>
+            mkFirst (LabelLN checkClosureL) Compiler.Hoopl.<*>
             mkMiddles [
               Phi2LN (VarR value, incomingL) (VarR forcedResult, forcingNeededL) v,
               BinOpLN BitAndLOp (VarR v) (LitR ClsrTagC) tag,
-              CmpWordLN (LitR ClsrTagC) tag ] <*>
+              CmpWordLN (LitR ClsrTagC) tag ] Compiler.Hoopl.<*>
             mkLast (CJumpLN JNE forcingNotNeededL checkSaturatedL)
       let checkSaturatedB =
-            mkFirst (LabelLN checkSaturatedL) <*>
+            mkFirst (LabelLN checkSaturatedL) Compiler.Hoopl.<*>
             mkMiddles [
               BinOpLN BitAndLOp (LitR ClearTagBitsC) (VarR v) tagCleared,
               LoadWordLN (VarPlusSymSA tagCleared AppsLeftO) appsLeft,
-              CmpWordLN (LitR (WordC 0)) appsLeft ] <*>
+              CmpWordLN (LitR (WordC 0)) appsLeft ] Compiler.Hoopl.<*>
             mkLast (CJumpLN JNE forcingNotNeededL forcingNeededL)
       let forcingNeededB =
-            mkFirst (LabelLN forcingNeededL) <*>
+            mkFirst (LabelLN forcingNeededL) Compiler.Hoopl.<*>
             mkMiddles [
-              CallRuntimeLN (ForceFn tagCleared) forcedResult ] <*>
+              CallRuntimeLN (ForceFn tagCleared) forcedResult ] Compiler.Hoopl.<*>
             mkLast (JumpLN checkClosureL)
       let forcingNotNeededB =
-            mkFirst (LabelLN forcingNotNeededL) <*>
-            mkMiddle (CopyWordLN (VarR v) result) <*>
+            mkFirst (LabelLN forcingNotNeededL) Compiler.Hoopl.<*>
+            mkMiddle (CopyWordLN (VarR v) result) Compiler.Hoopl.<*>
             mkLast (JumpLN theEndL)
       let theEndB = mkFirst (LabelLN theEndL)
 
@@ -253,11 +256,11 @@ hirToLIR hFn = do
 
     nodeMapFn (ForceHN lit result) = do
       (valCode, valConst) <- ratorLitToConstant lit
-      return $ valCode <*> mkMiddle (CopyWordLN valConst result)
+      return $ valCode Compiler.Hoopl.<*> mkMiddle (CopyWordLN valConst result)
 
     nodeMapFn (CopyValueHN value result) = do
       (valCode, valConst) <- ratorLitToConstant value
-      return $ valCode <*> mkMiddle (CopyWordLN valConst result)
+      return $ valCode Compiler.Hoopl.<*> mkMiddle (CopyWordLN valConst result)
 
     nodeMapFn (IfThenElseHN (LitR condition) tLbl fLbl) =
       return $ mkLast $ JumpLN $ if condition then tLbl else fLbl
@@ -265,19 +268,19 @@ hirToLIR hFn = do
     nodeMapFn (IfThenElseHN (VarR condition) tLbl fLbl) =
       let cmp = CmpWordLN (LitR BoolTrueC) condition
           jmp = CJumpLN JE tLbl fLbl
-      in return $ mkMiddle cmp <*> mkLast jmp
+      in return $ mkMiddle cmp Compiler.Hoopl.<*> mkLast jmp
 
     nodeMapFn (JumpHN lbl) = return $ mkLast $ JumpLN lbl
 
     nodeMapFn (ReturnHN value) = do
       (valCode, valConst) <- ratorLitToConstant value
-      return $ valCode <*> mkLast (ReturnLN valConst)
+      return $ valCode Compiler.Hoopl.<*> mkLast (ReturnLN valConst)
 
     genPush :: SSAVar -> Rator Constant -> SSAVar -> IRMonad PanicMap (Graph LNode O O)
     genPush clsrVar value newNode = do
       (validityCheck, appsLeft) <- checkPushValid (VarR clsrVar)
       (appsLeft', freshNode) <- twice freshVarName
-      return $ validityCheck <*>
+      return $ validityCheck Compiler.Hoopl.<*>
         mkMiddles [
           BinOpLN SubLOp (VarR appsLeft) (LitR (WordC 1)) appsLeft',
           CallRuntimeLN (AllocStructFn ClsrAppNodeST) freshNode,
@@ -293,7 +296,7 @@ hirToLIR hFn = do
       return (mkMiddles [
                  BinOpLN BitAndLOp (LitR ClearTagBitsC) var untaggedVar,
                  LoadWordLN (VarPlusSymSA untaggedVar AppsLeftO) appsLeft,
-                 CmpWordLN (LitR (WordC 0)) appsLeft ] <*>
+                 CmpWordLN (LitR (WordC 0)) appsLeft ] Compiler.Hoopl.<*>
               mkLast (CJumpLN JE panicLbl pushOkay) |*><*|
               mkFirst (LabelLN pushOkay), appsLeft)
 
@@ -301,7 +304,7 @@ hirToLIR hFn = do
       tmpB <- freshVarName
       compareOp <- genCmp op (LitR inA) (VarR tmpB) out
       return $
-        mkMiddle (CopyWordLN (LitR inB) tmpB) <*> compareOp
+        mkMiddle (CopyWordLN (LitR inB) tmpB) Compiler.Hoopl.<*> compareOp
 
     genCmp op (VarR inA) (LitR inB) out =
       genCmp' (CmpWordLN (LitR inB) inA) (opToJC op) (LitR BoolTrueC)
@@ -314,13 +317,13 @@ hirToLIR hFn = do
     genCmp' compareOp jmpCond jumpTakenVal jumpNotTakenVal out = do
       (jumpTakenLbl, jumpNotTakenLbl) <- twice freshLabel
       end <- freshLabel
-      let jumpTakenBody = mkFirst (LabelLN jumpTakenLbl) <*>
-                          mkMiddle (CopyWordLN jumpTakenVal out) <*>
+      let jumpTakenBody = mkFirst (LabelLN jumpTakenLbl) Compiler.Hoopl.<*>
+                          mkMiddle (CopyWordLN jumpTakenVal out) Compiler.Hoopl.<*>
                           mkLast (JumpLN end)
-          jumpNotTakenBody = mkFirst (LabelLN jumpNotTakenLbl) <*>
-                             mkMiddle (CopyWordLN jumpNotTakenVal out) <*>
+          jumpNotTakenBody = mkFirst (LabelLN jumpNotTakenLbl) Compiler.Hoopl.<*>
+                             mkMiddle (CopyWordLN jumpNotTakenVal out) Compiler.Hoopl.<*>
                              mkLast (JumpLN end)
-      return $ mkMiddle compareOp <*>
+      return $ mkMiddle compareOp Compiler.Hoopl.<*>
         mkLast (CJumpLN jmpCond jumpTakenLbl jumpNotTakenLbl) |*><*|
         jumpTakenBody |*><*| jumpNotTakenBody |*><*|
         mkFirst (LabelLN end)
@@ -347,16 +350,16 @@ hirToLIR hFn = do
     genDivision inA (LitR inB) result = do
       tmpB <- freshVarName
       divOp <- genDivision inA (VarR tmpB) result
-      return $ mkMiddle (CopyWordLN (LitR inB) tmpB) <*> divOp
+      return $ mkMiddle (CopyWordLN (LitR inB) tmpB) Compiler.Hoopl.<*> divOp
 
     genDivision inA (VarR inB) result = do
       divisorIsZero <- getPanicLabel "encountered division by zero"
       divisorIsNotZero <- freshLabel
       resultUnshifted <- freshVarName
-      let zeroCheck = mkMiddle (CmpWordLN (LitR (WordC 0)) inB) <*>
+      let zeroCheck = mkMiddle (CmpWordLN (LitR (WordC 0)) inB) Compiler.Hoopl.<*>
                       mkLast (CJumpLN JE divisorIsZero divisorIsNotZero)
       return $ zeroCheck |*><*|
-        mkFirst (LabelLN divisorIsNotZero) <*>
+        mkFirst (LabelLN divisorIsNotZero) Compiler.Hoopl.<*>
         mkMiddles [ BinOpLN DivLOp inA (VarR inB) resultUnshifted,
                     BinOpLN RShiftLOp (VarR resultUnshifted) (LitR (WordC 2))
                     result ]
@@ -392,7 +395,7 @@ hirToLIR hFn = do
         checkPassed <- freshLabel
         return $ mkMiddles [
           BinOpLN BitAndLOp (VarR var) (LitR (WordC mask)) extractedTag,
-          CmpWordLN (LitR tag) extractedTag ] <*>
+          CmpWordLN (LitR tag) extractedTag ] Compiler.Hoopl.<*>
           mkLast (CJumpLN JE checkPassed panicLbl) |*><*|
           mkFirst (LabelLN checkPassed)
 
@@ -411,7 +414,7 @@ hirToLIR hFn = do
         Just (lbl, _) -> return lbl
         Nothing -> do
           panicLbl <- freshLabel
-          let panicBlock = mkFirst (LabelLN panicLbl) <*>
+          let panicBlock = mkFirst (LabelLN panicLbl) Compiler.Hoopl.<*>
                            mkLast (PanicLN error_str)
           irPutCustom $ M.insert error_str (panicLbl, panicBlock) lblMap
           return panicLbl

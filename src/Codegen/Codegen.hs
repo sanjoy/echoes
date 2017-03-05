@@ -15,6 +15,8 @@ import LIR.LIR
 import Utils.Common
 import Utils.Graph
 
+type PHIInfo = (M.Map SSAVar SSAVar, [(Label, Constant, SSAVar)])
+
 eliminatePhi :: Graph LNode C C -> M (Graph LNode C C)
 eliminatePhi graph =
   let (varMap, constMap) = foldGraphNodes gatherCopies graph (M.empty, [])
@@ -24,9 +26,10 @@ eliminatePhi graph =
     let withConstCopies = foldl copyOneConstant withVarCopies constMap
     return $ GMany NothingO withConstCopies NothingO
     where
+      gatherCopies :: forall e x. LNode e x -> PHIInfo -> PHIInfo
       gatherCopies (Phi2LN a b result) =
-        let f (VarR v, _) (vM, cM) = (M.insert v result vM, cM)
-            f (LitR l, lbl) (vM, cM) = (vM, (lbl, l, result):cM)
+        let f (VarR v, _) (varMap, constMap) = (M.insert v result varMap, constMap)
+            f (LitR l, lbl) (varMap, constMap) = (varMap, (lbl, l, result):constMap)
         in f a . f b
       gatherCopies _ = id
 
@@ -42,12 +45,12 @@ eliminatePhi graph =
 
       copyOneConstant lMap (lbl, lit, result) =
         maybe lMap (insertCopy lMap lbl lit result) $ mapLookup lbl lMap
-      insertCopy lMap lbl lit result block =
-        let (JustC front, middles, JustC end) = blockToNodeList block
-            newBlock =
-              blockOfNodeList (JustC front, middles ++ [copyInst], JustC end)
+      insertCopy ::
+          LabelMap (Block LNode C C) -> Label -> Constant -> SSAVar -> Block LNode C C -> LabelMap (Block LNode C C)
+      insertCopy lMap lbl lit result (BlockCC front middles back) =
+        let newBlockMiddle = blockFromList $ (blockToList middles) ++ [copyInst]
             copyInst = CopyWordLN (LitR lit) result
-        in mapInsert lbl newBlock lMap
+        in mapInsert lbl (BlockCC front newBlockMiddle back) lMap
 
       doNothingCO = return . mkFirst
       doNothingOC = return . mkLast
@@ -66,12 +69,10 @@ lirToMachineCode opts argCounts (LFunction _ _ entry graph) = do
     mConcatMap f list = liftM concat $ mapM f list
     showBlock :: Block (RegInfNode RgLNode) C C -> M [MachineInst]
     showBlock block =
-      let (JustC lbl :: MaybeC C ((RegInfNode RgLNode) C O),
-           inner,
-           JustC jmp :: MaybeC C ((RegInfNode RgLNode) O C))
-            = blockToNodeList block
+      let BlockCC lbl innerBlock jmp = block
+          innerNodes = blockToList innerBlock
       in rNodeToMI argCounts lbl `mApp`
-         mConcatMap (rNodeToMI argCounts) inner `mApp` rNodeToMI argCounts jmp
+         mConcatMap (rNodeToMI argCounts) innerNodes `mApp` rNodeToMI argCounts jmp
       where
         rNodeToMI :: (ClsrId -> Int) -> RegInfNode RgLNode e x ->
                      M [MachineInst]

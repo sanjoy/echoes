@@ -25,13 +25,13 @@ else
     OUTPUT=$2
 fi
 
-ROOT=`dirname \`pwd\``
+ROOT=$(dirname $0)
 
 echo "Intermediate output in ${OUTPUT}.S"
 
 $ROOT/dist/build/echoes/echoes --input=${1} --output=${OUTPUT}.S
-gcc -g3 ${GCC_OPT_LEVEL} ${OUTPUT}.S $ROOT/src/Runtime/runtime.c \
-    $ROOT/src/Runtime/runtime-x86.S -o ${OUTPUT}
+clang -g3 ${GCC_OPT_LEVEL} ${OUTPUT}.S $ROOT/src/Runtime/runtime.c \
+    $ROOT/src/Runtime/runtime-x86.S -Wl,-no_pie -o ${OUTPUT}
 
 if [[ "$KEEP_INTERMEDIATES" == "no" ]]; then
     rm -r ${OUTPUT}.S

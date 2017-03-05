@@ -185,7 +185,7 @@ liftedTermToHIR isEpoch fullTerm = do
   entry <- freshLabel
   (functionBody, resultVar) <- emit fullTerm
   returnStmt <- makeReturnStmt resultVar
-  return (mkFirst (LabelHN entry) <*> functionBody <*> returnStmt, entry)
+  return (mkFirst (LabelHN entry) Compiler.Hoopl.<*> functionBody Compiler.Hoopl.<*> returnStmt, entry)
   where emit :: LiftedTerm -> IRMonad () (Graph HNode O O, SSAVar)
         emit (ArgLT argId) = loadSimple (LoadArgHN argId)
         emit (IntLT intLit) = loadSimple (LoadLitHN $ IntL intLit)
@@ -196,9 +196,9 @@ liftedTermToHIR isEpoch fullTerm = do
           (argCode, argVar) <- emit arg
           forcedFnVar <- freshVarName
           resultVar <- freshVarName
-          let finalBody = functionCode <*>
-                          argCode <*>
-                          mkMiddle (ForceHN (VarR functionVar) forcedFnVar) <*>
+          let finalBody = functionCode Compiler.Hoopl.<*>
+                          argCode Compiler.Hoopl.<*>
+                          mkMiddle (ForceHN (VarR functionVar) forcedFnVar) Compiler.Hoopl.<*>
                           mkMiddle (PushHN (VarR forcedFnVar) (VarR argVar)
                                     resultVar)
           return (finalBody, resultVar)
@@ -210,10 +210,10 @@ liftedTermToHIR isEpoch fullTerm = do
           (tCode, tLabel, tRes) <- emitIfBranch trueBranch finalLabel
           (fCode, fLabel, fRes) <- emitIfBranch falseBranch finalLabel
           let ifThenElse =
-                conditionCode <*>
-                mkMiddle (ForceHN (VarR condVar) forcedCondVar) <*>
+                conditionCode Compiler.Hoopl.<*>
+                mkMiddle (ForceHN (VarR condVar) forcedCondVar) Compiler.Hoopl.<*>
                 mkLast (IfThenElseHN (VarR forcedCondVar) tLabel fLabel) |*><*|
-                tCode |*><*| fCode |*><*| mkFirst (LabelHN finalLabel) <*>
+                tCode |*><*| fCode |*><*| mkFirst (LabelHN finalLabel) Compiler.Hoopl.<*>
                 mkMiddle (Phi2HN (VarR tRes, tLabel)
                           (VarR fRes, fLabel) resultVar)
           return (ifThenElse, resultVar)
@@ -224,7 +224,7 @@ liftedTermToHIR isEpoch fullTerm = do
           forcedRightVar <- freshVarName
           resultVar <- freshVarName
           let computeBinOp =
-                leftG <*> rightG <*> mkMiddles [
+                leftG Compiler.Hoopl.<*> rightG Compiler.Hoopl.<*> mkMiddles [
                   ForceHN (VarR leftVar) forcedLeftVar,
                   ForceHN (VarR rightVar) forcedRightVar,
                   BinOpHN op (VarR forcedLeftVar) (VarR forcedRightVar)
@@ -236,14 +236,14 @@ liftedTermToHIR isEpoch fullTerm = do
         emitIfBranch term finalLabel = do
           branchLabel <- freshLabel
           (termBody, termResult) <- emit term
-          let termCode = mkFirst (LabelHN branchLabel) <*> termBody <*>
+          let termCode = mkFirst (LabelHN branchLabel) Compiler.Hoopl.<*> termBody Compiler.Hoopl.<*>
                          mkLast (JumpHN finalLabel)
           return (termCode, branchLabel, termResult)
 
         makeReturnStmt resultVar =
           if isEpoch then do
             forcedResult <- freshVarName
-            return $ mkMiddle (ForceHN (VarR resultVar) forcedResult) <*>
+            return $ mkMiddle (ForceHN (VarR resultVar) forcedResult) Compiler.Hoopl.<*>
               mkLast (ReturnHN $ VarR forcedResult)
           else return $ mkLast (ReturnHN $ VarR resultVar)
 

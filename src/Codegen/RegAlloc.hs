@@ -94,7 +94,7 @@ nullRegAlloc graph =
             RegInfNode freeRegsAfterLoads $ mapGenLNodeRegs
             (`directLookup` assignRegs) node
 
-      in return $ mkMiddles loadInsts <*> mkLast newNode
+      in return $ mkMiddles loadInsts Compiler.Hoopl.<*> mkLast newNode
 
     genLoadInst :: M.Map SSAVar Reg -> M.Map SSAVar Int ->
                    (RegInfo Reg, [RegInfNode RgLNode O O]) -> SSAVar ->

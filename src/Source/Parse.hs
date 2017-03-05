@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# OPTIONS_GHC -Wall -Werror -i..  #-}
 
 module Source.Parse(parseString) where

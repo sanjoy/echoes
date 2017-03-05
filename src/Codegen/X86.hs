@@ -57,11 +57,11 @@ generalRegSet = S.fromList [
 getLiveCallerSavedRegs :: RegInfo Reg -> [Reg]
 getLiveCallerSavedRegs rI = riNonFreeRegsIn rI calleeSavedRegs
 
-lowerConstant :: (ClsrId -> Int) -> Constant -> Op
+lowerConstant :: (ClsrId -> Int) -> Constant -> (Op, Bool)
 lowerConstant _ (ClsrCodePtrC clsrId) =
-  SymWordOp $ DirectString $ "closure_body_" ++ show clsrId
+  (SymWordOp $ DirectString $ "$closure_body_" ++ show clsrId, True)
 lowerConstant appLimits op =
-  LitWordOp $ DollarString $ constToString appLimits op
+  (LitWordOp $ DollarString $ constToString appLimits op, False)
 
 constToString :: (ClsrId -> Int) -> Constant -> String
 constToString _ (WordC w) = show w
@@ -107,6 +107,7 @@ instance Show DirectString where show (DirectString s) = s
 data MachineInst =
   LabelMI String | CommentMI String | StringMI String
   | MovMI_RR Reg Reg | MovMI_OR Op Reg | MovMI_RO Reg Op
+  | MovAbsMI_OR Op Reg | MovAbsMI_RO Reg Op
   | MovMI_IO DollarString Op | MovMI_IR DollarString Reg
   | CmpMI_RR Reg Reg | CmpMI_OR Op Reg
   | AddMI_RR Reg Reg | AddMI_OR Op Reg | SubMI_RR Reg Reg | SubMI_OR Op Reg
@@ -133,8 +134,9 @@ lirNodeToMachineInst' :: (ClsrId -> Int) -> RegInfo Reg -> GenLNode Reg e x ->
 
 lirNodeToMachineInst' _ _ (LabelLN lbl) = return [LabelMI $ show lbl]
 
-lirNodeToMachineInst' aL _ (CopyWordLN (LitR cValue) reg) = return [
-  MovMI_OR (lowerConstant aL cValue) reg]
+lirNodeToMachineInst' aL _ (CopyWordLN (LitR cValue) reg) =
+    let (loweredOp, needsAbs) = lowerConstant aL cValue
+    in return [ (if needsAbs then MovAbsMI_OR else MovMI_OR) loweredOp reg]
 
 lirNodeToMachineInst' _ _ (CopyWordLN (VarR srcR) destR) =
   return [MovMI_RR srcR destR]
@@ -145,12 +147,14 @@ lirNodeToMachineInst' _ _ (LoadWordLN symAddr reg) = return [
 lirNodeToMachineInst' _ _ (StoreWordLN symAddr (VarR reg)) = return [
   MovMI_RO reg (lowerSymAddress symAddr)]
 
-lirNodeToMachineInst' aL _ (StoreWordLN symAddr (LitR cValue)) = return [
-  MovMI_OR (lowerConstant aL cValue) Reg_RAX,
-  MovMI_RO Reg_RAX (lowerSymAddress symAddr) ]
+lirNodeToMachineInst' aL _ (StoreWordLN symAddr (LitR cValue)) =
+    let (loweredOp, needsAbs) = lowerConstant aL cValue
+        opOR = if needsAbs then MovAbsMI_OR else MovMI_OR
+    in return [ opOR loweredOp Reg_R11,
+                MovMI_RO Reg_R11 (lowerSymAddress symAddr) ]
 
 lirNodeToMachineInst' aL _ (CmpWordLN (LitR c) v) = return [
-  CmpMI_OR (lowerConstant aL c) v]
+  CmpMI_OR (fst $ lowerConstant aL c) v]
 
 lirNodeToMachineInst' _ _ (CmpWordLN (VarR vA) vB) = return [
   CmpMI_RR vA vB]
@@ -162,7 +166,7 @@ lirNodeToMachineInst' aL gcRegs (BinOpLN op a b r) = do
   copyCode <- lirNodeToMachineInst' aL gcRegs (CopyWordLN a r)
   return $ copyCode ++ [
     case b of (VarR reg) -> injFor_RR op reg r
-              (LitR c) -> injFor_OR op (lowerConstant aL c) r]
+              (LitR c) -> injFor_OR op (fst $ lowerConstant aL c) r]
   where injFor_RR BitAndLOp = AndMI_RR
         injFor_RR BitOrLOp = OrMI_RR
         injFor_RR BitXorLOp = XorMI_RR
@@ -230,7 +234,7 @@ lirNodeToMachineInst' _ rI (CallRuntimeLN (ForceFn value) result) =
 lirNodeToMachineInst' _ _ (PanicLN panicString) = do
   stringLabel <- Hoopl.freshLabel
   return [
-    MovMI_IR (DollarString $ show stringLabel) Reg_RDI,
+    MovAbsMI_OR (LitWordOp $ DollarString $ show stringLabel) Reg_RDI,
     CallMI_I $ DirectString "_runtime_panic",
     LabelMI $ show stringLabel,
     StringMI panicString
@@ -313,6 +317,8 @@ showMInst mInst = case mInst of
   MovMI_RO r op -> movq r op
   MovMI_IO i op -> movq i op
   MovMI_IR i r  -> movq i r
+  MovAbsMI_RO i r  -> movabs i r
+  MovAbsMI_OR i r  -> movabs i r
 
   CmpMI_RR r1 r2 -> cmpq r1 r2
   CmpMI_OR op r -> cmpq op r
@@ -352,6 +358,7 @@ showMInst mInst = case mInst of
   Unimplemented s -> "unimplemented: " ++ s
   where
     movq src dest = "movq " ++ show src ++ ", " ++ show dest
+    movabs src dest = "movabsq " ++ show src ++ ", " ++ show dest
     cmpq a b = "cmpq " ++ show a ++ ", " ++ show b
     addq a b  = "addq " ++ show a ++ ", " ++ show b
     subq a b  = "subq " ++ show a ++ ", " ++ show b

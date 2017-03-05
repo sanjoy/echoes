@@ -14,8 +14,7 @@ mapConcatGraph :: forall n n' m. (UniqueMonad m, NonLocal n, NonLocal n') =>
                    n O O -> m (Graph n' O O),
                    n O C -> m (Graph n' O C)) ->
                   Graph n C C -> m (Graph n' C C)
-mapConcatGraph (nodeMapFnCO, nodeMapFnOO, nodeMapFnOC)
-  (GMany NothingO lMap NothingO) =
+mapConcatGraph (nodeMapFnCO, nodeMapFnOO, nodeMapFnOC) (GMany NothingO lMap NothingO) =
   let newSubGraphs = map blockMapFn $ mapElems lMap
       newGraph = foldl1 (liftM2 (|*><*|)) newSubGraphs
   in newGraph
@@ -29,10 +28,10 @@ mapConcatGraph (nodeMapFnCO, nodeMapFnOO, nodeMapFnOC)
     closeOpen node graph = liftM2 (|*><*|) graph $ nodeMapFnCO node
 
     openOpen :: UniqueMonad m => n O O -> m (Graph n' e O) -> m (Graph n' e O)
-    openOpen node graph  = liftM2 (<*>) graph $ nodeMapFnOO node
+    openOpen node graph  = liftM2 (Compiler.Hoopl.<*>) graph $ nodeMapFnOO node
 
     openClose :: UniqueMonad m => n O C -> m (Graph n' e O) -> m (Graph n' e C)
-    openClose node graph = liftM2 (<*>) graph $ nodeMapFnOC node
+    openClose node graph = liftM2 (Compiler.Hoopl.<*>) graph $ nodeMapFnOC node
 
 mapConcatGraph' :: forall n n' m. (UniqueMonad m, NonLocal n, NonLocal n') =>
                    (forall e' x'. n e' x' -> m (Graph n' e' x')) ->
